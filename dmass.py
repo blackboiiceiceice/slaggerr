@@ -321,7 +321,7 @@ async def on_message(message):
 class RecruiterLaunchView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
 
-    @discord.ui.button(label="Apply for Recruiter 💼", style=discord.ButtonStyle.secondary, custom_id="apply_recruiter_btn")
+    @discord.ui.button(label="create a ticket ✔️", style=discord.ButtonStyle.secondary, custom_id="apply_recruiter_btn")
     async def apply_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
         member = interaction.user
