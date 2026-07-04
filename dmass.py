@@ -40,7 +40,7 @@ SYSTEM_START_TIME = time.time()
 
 # Role & Interface Structural Tags
 TARGET_ROLE_NAME = "[✦] Recruiter"
-STAFF_ROLE_NAME = "[•] Ticket Perms"
+STAFF_ROLE_NAME = "tick"
 TARGET_CHANNEL_NAME = "﹒📈︲movements"
 WELCOME_CHAT_CHANNEL = "﹒💬︲chat"  
 ROLE_TRIAL_MEMBER = "[+] Trial Member"
@@ -550,8 +550,8 @@ class MasterApplicationCog(commands.Cog):
     @commands.command(name="restrike")
     @commands.has_permissions(administrator=True)
     async def restrike_panel(self, ctx):
-        panel_desc = f"### {LINE_SEPARATOR[:9]} ❖ {LINE_SEPARATOR[:9]}\n\nWant to officially step up and join the **Heaven** management rotation?\n\n**📋 THE MANDATE:**\n> You must secure at least **2 active members** via your personal invite link within your first 7 days.\n\n### {LINE_SEPARATOR[:9]} ❖ {LINE_SEPARATOR[:9]}\nClick the button below to initiate a private clearance ticket."
-        embed = discord.Embed(title="```✦ RECRUITER APPLICATIONS ✦\n```", description=panel_desc, color=EMBED_COLOR)
+        panel_desc = f"### {LINE_SEPARATOR[:9]} ❖ {LINE_SEPARATOR[:9]}\n\n**General Support**\nQuestions, technical issues, setup help, or assistance with the client.\n\n**Buy**\nOpen a ticket if you're interested in purchasing Slag Client.\n\n**Partnership**\nFor collaborations, promotions, and partnership inquiries."
+        embed = discord.Embed(title="```♚ slag ♚\n```", description=panel_desc, color=EMBED_COLOR)
         await ctx.send(embed=embed, view=RecruiterLaunchView())
         await ctx.message.delete()
 
