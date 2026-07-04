@@ -724,7 +724,7 @@ class DiagnosticsAndExtraUtils(commands.Cog):
     @commands.command(name="help")
     async def custom_help(self, ctx):
         help_desc = (
-            "## 🎛️ HEAVEN MASTER CORE MANUAL\n\n"
+            "## 🎛️ SLAG COMMANDS\n\n"
             "### ⚔️ Recruitment Operations\n"
             "• `;apply <IGN>` — Scrape Mojang/NameMC database logs for alias tracking history.\n"
             "• `;restrike` — Drop the interactive recruiter hiring request application embed setup.\n"
