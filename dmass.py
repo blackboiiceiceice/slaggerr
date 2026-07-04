@@ -1183,7 +1183,7 @@ async def check_recruiter_quotas():
 
 @tasks.loop(minutes=5)
 async def rotate_status_presents():
-    opts = ["67 | 😊", "⚔️ Heaven Guild Core", "📊 Scoping NameMC Telemetry", "📋 Checking Recruiter Quotas"]
+    opts = ["slag more.", "slag.", "slag4life", "nah id slag."]
     await client.change_presence(activity=discord.Game(name=random.choice(opts)))
 
 
