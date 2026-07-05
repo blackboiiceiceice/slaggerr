@@ -40,7 +40,7 @@ SYSTEM_START_TIME = time.time()
 
 # Role & Interface Structural Tags
 TARGET_ROLE_NAME = "[✦] Recruiter"
-STAFF_ROLE_NAME = "tick"
+STAFF_ROLE_NAME = "[•] Ticket Perms"
 TARGET_CHANNEL_NAME = "﹒📈︲movements"
 WELCOME_CHAT_CHANNEL = "﹒💬︲chat"  
 ROLE_TRIAL_MEMBER = "[+] Trial Member"
@@ -321,7 +321,7 @@ async def on_message(message):
 class RecruiterLaunchView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
 
-    @discord.ui.button(label="create a ticket ✔️", style=discord.ButtonStyle.secondary, custom_id="apply_recruiter_btn")
+    @discord.ui.button(label="Apply for Recruiter 💼", style=discord.ButtonStyle.secondary, custom_id="apply_recruiter_btn")
     async def apply_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
         member = interaction.user
@@ -550,8 +550,8 @@ class MasterApplicationCog(commands.Cog):
     @commands.command(name="restrike")
     @commands.has_permissions(administrator=True)
     async def restrike_panel(self, ctx):
-        panel_desc = f"### {LINE_SEPARATOR[:9]} ❖ {LINE_SEPARATOR[:9]}\n\n**General Support**\nQuestions, technical issues, setup help, or assistance with the client.\n\n**Buy**\nOpen a ticket if you're interested in purchasing Slag Client.\n\n**Partnership**\nFor collaborations, promotions, and partnership inquiries."
-        embed = discord.Embed(title="```♚ slag ♚\n```", description=panel_desc, color=EMBED_COLOR)
+        panel_desc = f"### {LINE_SEPARATOR[:9]} ❖ {LINE_SEPARATOR[:9]}\n\nWant to officially step up and join the **Heaven** management rotation?\n\n**📋 THE MANDATE:**\n> You must secure at least **2 active members** via your personal invite link within your first 7 days.\n\n### {LINE_SEPARATOR[:9]} ❖ {LINE_SEPARATOR[:9]}\nClick the button below to initiate a private clearance ticket."
+        embed = discord.Embed(title="```✦ RECRUITER APPLICATIONS ✦\n```", description=panel_desc, color=EMBED_COLOR)
         await ctx.send(embed=embed, view=RecruiterLaunchView())
         await ctx.message.delete()
 
@@ -724,7 +724,7 @@ class DiagnosticsAndExtraUtils(commands.Cog):
     @commands.command(name="help")
     async def custom_help(self, ctx):
         help_desc = (
-            "## 🎛️ SLAG COMMANDS\n\n"
+            "## 🎛️ HEAVEN MASTER CORE MANUAL\n\n"
             "### ⚔️ Recruitment Operations\n"
             "• `;apply <IGN>` — Scrape Mojang/NameMC database logs for alias tracking history.\n"
             "• `;restrike` — Drop the interactive recruiter hiring request application embed setup.\n"
@@ -1183,7 +1183,7 @@ async def check_recruiter_quotas():
 
 @tasks.loop(minutes=5)
 async def rotate_status_presents():
-    opts = ["slag more.", "slag.", "slag4life", "nah id slag."]
+    opts = ["67 | 😊", "⚔️ Heaven Guild Core", "📊 Scoping NameMC Telemetry", "📋 Checking Recruiter Quotas"]
     await client.change_presence(activity=discord.Game(name=random.choice(opts)))
 
 
