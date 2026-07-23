@@ -20,14 +20,12 @@ intents.members = True
 intents.invites = True
 intents.presences = True
 intents.moderation = True
-intents.webhooks = True
-intents.audit_logs = True
 
 client = commands.Bot(command_prefix="", case_insensitive=True, intents=intents)
 
 EMBED_COLOR = 0x2b2d31
 
-# Persistent Files
+# Files
 DATA_FILE = "recruiters.json"
 TRIALS_FILE = "active_trials.json"
 FILTER_FILE = "chat_filter.json"
@@ -247,28 +245,51 @@ async def on_message(message):
     await client.process_commands(message)
 
 # ==========================================
-# VIEWS (Full from first script)
-# ==========================================
-# Note: Full Views code is in the saved file (RecruiterLaunchView, TicketActionView, etc.)
-
-# ==========================================
-# HELP COMMAND (Matches your image)
+# HELP (Exact from your image)
 # ==========================================
 @client.event
 async def on_message(message):
     if message.content.lower() == "help":
-        embed = discord.Embed(title="Heaven Bot Core Directory", color=EMBED_COLOR)
-        embed.add_field(name="Recruitment", value="`restrike` • `refresh_recruits` • `leaderboard` • `addtrial <user> [rec]` • `pass <user>` • `fail <user> [reason]` • `trials` • `promote <user> <role>`", inline=False)
-        embed.add_field(name="Moderation (Hierarchy Required)", value="`purge <num>` • `kick <user>` • `ban <user>` • `unban <id>` • `mute <user> <min>` • `unmute <user>` • `nuke` • `lockdown` • `slowmode <sec>` • `setnick <user> <nick>` • `addfilter <word>`", inline=False)
-        embed.add_field(name="Utility, Tags & 67 (Public)", value="`apply <ign>` • `snipe` • `editsnipe` • `afk <reason>` • `tag <add/delete/list/get>` • `ping` • `whois <user>` • `lb67` • `serverinfo` • `avatar <user>`", inline=False)
-        embed.add_field(name="Economy & Casino (Public)", value="`daily` • `balance [user]` • `slots <bet>`", inline=False)
-        embed.add_field(name="Entertainment & Games (Public)", value="`ship <u1> [u2]` • `8ball <question>` • `coinflip` • `roll [sides]` • `reverse <text>` • `roulette` • `roast [user]` • `chaos`", inline=False)
-        embed.add_field(name="Anti-Nuke & Welcome", value="`testwelcome` • `wl <user>` • `unwl <user>` • `whitelisted`", inline=False)
+        embed = discord.Embed(title="⚡ Heaven Bot Core Directory", color=discord.Color.from_rgb(54, 57, 63))
+        
+        embed.add_field(
+            name="📋 Recruitment",
+            value="`restrike` • `refresh_recruits` • `leaderboard` • `addtrial <user> [rec]` • `pass <user>` • `fail <user> [reason]` • `trials` • `promote <user> <role>`",
+            inline=False
+        )
+        embed.add_field(
+            name="🔨 Moderation (Hierarchy Required)",
+            value="`purge <num>` • `kick <user>` • `ban <user>` • `unban <id>` • `mute <user> <min>` • `unmute <user>` • `nuke` • `lockdown` • `slowmode <sec>` • `setnick <user> <nick>` • `addfilter <word>`",
+            inline=False
+        )
+        embed.add_field(
+            name="⚙️ Utility, Tags & 67 (Public)",
+            value="`apply <ign>` • `snipe` • `editsnipe` • `afk <reason>` • `tag <add/delete/list/get>` • `ping` • `whois <user>` • `lb67` • `serverinfo` • `avatar <user>`",
+            inline=False
+        )
+        embed.add_field(
+            name="💰 Economy & Casino (Public)",
+            value="`daily` • `balance [user]` • `slots <bet>`",
+            inline=False
+        )
+        embed.add_field(
+            name="🎲 Entertainment & Games (Public)",
+            value="`ship <u1> [u2]` • `8ball <question>` • `coinflip` • `roll [sides]` • `reverse <text>` • `roulette` • `roast [user]` • `chaos`",
+            inline=False
+        )
+        embed.add_field(
+            name="🛡️ Anti-Nuke & Welcome",
+            value="`testwelcome` • `wl <user>` • `unwl <user>` • `whitelisted`",
+            inline=False
+        )
+        embed.set_footer(text="Heaven System • No Prefix Required")
         await message.channel.send(embed=embed)
         return
 
+    await client.process_commands(message)
+
 # ==========================================
-# MAIN
+# TASKS
 # ==========================================
 @tasks.loop(minutes=5)
 async def rotate_status():
@@ -280,7 +301,7 @@ async def main():
         if token:
             await client.start(token)
         else:
-            print("Set BOT_TOKEN environment variable")
+            print("Set BOT_TOKEN")
 
 if __name__ == "__main__":
     asyncio.run(main())
