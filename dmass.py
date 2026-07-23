@@ -17,7 +17,7 @@ intents.guilds = True
 intents.members = True
 intents.invites = True
 
-# Prefixless setup (invoked directly by command name, e.g., 'help', 'kick', 'apply')
+# Prefixless setup (invoked directly by command name, e.g., 'help', 'kick', 'apply', 'pass')
 client = commands.Bot(command_prefix="", case_insensitive=True, intents=intents)
 
 # Dark Theme Aesthetics
@@ -26,30 +26,28 @@ EMBED_COLOR = 0x2b2d31
 # File Paths for Persistence
 DATA_FILE = "recruiters.json"
 TRIALS_FILE = "active_trials.json"
-LB_STATE_FILE = "lb_state.json"
 FILTER_FILE = "chat_filter.json"
-TODO_FILE = "todo_list.json"
 DB_67_FILE = "leaderboard_67.json"
 TAGS_FILE = "tags.json"
-SYSTEM_START_TIME = time.time()
+ECONOMY_FILE = "economy.json"
+SLOWMODE_FILE = "slowmode_settings.json"
+AUTOROLES_FILE = "autoroles.json"
 
 # Role & Channel Names
 TARGET_ROLE_NAME = "[✦] Recruiter"
 STAFF_ROLE_NAME = "[•] Ticket Perms"
-TARGET_CHANNEL_NAME = "﹒📈︲movements"
-WELCOME_CHAT_CHANNEL = "﹒💬︲chat"
 ROLE_TRIAL_MEMBER = "[+] Trial Member"
 ROLE_TRIAL_AS = "[+] Trial AS"
 ROLE_TRIAL_EU = "[+] Trial EU"
 ROLE_OFFICIAL_MEMBER = "[+] Member"
-ROLE_UNVERIFIED = "unverified"
-ROLE_67_NAME = "67"
 
 # In-Memory Cache & States
 invite_cache = {}
 sniped_messages = {}
+edited_sniped_messages = {}
 afk_users = {}
 SERVER_LOCKDOWN_STATUS = False
+SLOWMODE_ACTIVE = False
 
 # ==========================================
 # 2. HIERARCHY & PERMISSION CHECK
@@ -69,7 +67,7 @@ def has_bot_hierarchy():
         if author.top_role >= bot_member.top_role or author.guild_permissions.value >= bot_member.guild_permissions.value:
             return True
 
-        await ctx.send("❌ Permission denied: Your hierarchy/permissions must match or exceed the bot's.", delete_after=5)
+        await ctx.send("❌ **Permission Denied:** Your hierarchy/permissions must match or exceed the bot's.", delete_after=5)
         return False
     return commands.check(predicate)
 
@@ -104,6 +102,9 @@ def save_67_data(data): save_json(DB_67_FILE, data)
 def load_tags(): return load_json(TAGS_FILE, {})
 def save_tags(data): save_json(TAGS_FILE, data)
 
+def load_economy(): return load_json(ECONOMY_FILE, {})
+def save_economy(data): save_json(DATA_FILE, data) if False else save_json(ECONOMY_FILE, data)
+
 # ==========================================
 # 4. LIFECYCLE HOOKS & EVENT LISTENERS
 # ==========================================
@@ -114,6 +115,7 @@ async def on_ready():
     # Register interactive views persistently
     client.add_view(RecruiterLaunchView())
     client.add_view(RecruitLaunchView())
+    client.add_view(TicketActionView())
     
     for guild in client.guilds:
         try:
@@ -126,12 +128,35 @@ async def on_ready():
     check_trial_expirations.start()
 
 @client.event
+async def on_member_join(member):
+    # Feature 1: Auto-Role Assignment
+    autoroles = load_json(AUTOROLES_FILE, [])
+    for role_name in autoroles:
+        role = discord.utils.get(member.guild.roles, name=role_name)
+        if role:
+            try:
+                await member.add_roles(role)
+            except discord.Forbidden:
+                pass
+
+@client.event
 async def on_message_delete(message):
     if message.author.bot:
         return
     sniped_messages[message.channel.id] = {
         "content": message.content,
         "author": message.author,
+        "time": datetime.utcnow()
+    }
+
+@client.event
+async def on_message_edit(before, after):
+    if before.author.bot or before.content == after.content:
+        return
+    edited_sniped_messages[before.channel.id] = {
+        "before": before.content,
+        "after": after.content,
+        "author": before.author,
         "time": datetime.utcnow()
     }
 
@@ -372,7 +397,7 @@ class RecruiterDecisionView(discord.ui.View):
 
 
 # ==========================================
-# 6. COMMAND COGS (ALL PREFIXLESS)
+# 6. COMMAND COGS
 # ==========================================
 class Management(commands.Cog):
     def __init__(self, bot): self.bot = bot
@@ -432,9 +457,10 @@ class Management(commands.Cog):
         save_trials_data(trials)
         await ctx.send(f"Added trial for {member.mention} under recruiter {recruiter.mention}.")
 
-    @commands.command()
+    # RENAMED FUNCTION TO AVOID PYTHON KEYWORD COLLISION (`pass`)
+    @commands.command(name="pass")
     @has_bot_hierarchy()
-    async def pass(self, ctx, member: discord.Member):
+    async def pass_member(self, ctx, member: discord.Member):
         trials = load_trials_data()
         m_id = str(member.id)
         
@@ -555,6 +581,35 @@ class Moderation(commands.Cog):
         state = "ENABLED" if SERVER_LOCKDOWN_STATUS else "DISABLED"
         await ctx.send(f"🔒 Server Lockdown: **{state}**")
 
+    # Feature 2: Slowmode Command
+    @commands.command()
+    @has_bot_hierarchy()
+    async def slowmode(self, ctx, seconds: int = 0):
+        await ctx.channel.edit(slowmode_delay=seconds)
+        if seconds == 0:
+            await ctx.send("🐢 Slowmode disabled.")
+        else:
+            await ctx.send(f"🐢 Slowmode set to `{seconds}s`.")
+
+    # Feature 3: Nickname Management
+    @commands.command()
+    @has_bot_hierarchy()
+    async def setnick(self, ctx, member: discord.Member, *, nickname: str = None):
+        await member.edit(nick=nickname)
+        await ctx.send(f"Updated nickname for **{member.name}**.")
+
+    # Feature 4: Filter Word Manager
+    @commands.command()
+    @has_bot_hierarchy()
+    async def addfilter(self, ctx, word: str):
+        words = load_filter_words()
+        if word.lower() not in words:
+            words.append(word.lower())
+            save_filter_words(words)
+            await ctx.send(f"Added `{word}` to chat filter.")
+        else:
+            await ctx.send("Word is already filtered.")
+
 
 class UtilityAndTools(commands.Cog):
     def __init__(self, bot): self.bot = bot
@@ -566,6 +621,19 @@ class UtilityAndTools(commands.Cog):
         if not data:
             return await ctx.send("Nothing to snipe.")
         embed = discord.Embed(description=data["content"], color=EMBED_COLOR, timestamp=data["time"])
+        embed.set_author(name=data["author"].name, icon_url=data["author"].display_avatar.url)
+        await ctx.send(embed=embed)
+
+    # Feature 5: Edit Snipe Command
+    @commands.command()
+    @has_bot_hierarchy()
+    async def editsnipe(self, ctx):
+        data = edited_sniped_messages.get(ctx.channel.id)
+        if not data:
+            return await ctx.send("No recently edited messages found.")
+        embed = discord.Embed(title="Edit Snipe", color=EMBED_COLOR, timestamp=data["time"])
+        embed.add_field(name="Before", value=data["before"], inline=False)
+        embed.add_field(name="After", value=data["after"], inline=False)
         embed.set_author(name=data["author"].name, icon_url=data["author"].display_avatar.url)
         await ctx.send(embed=embed)
 
@@ -632,6 +700,91 @@ class UtilityAndTools(commands.Cog):
         embed = discord.Embed(title="67 Leaderboard", description=desc, color=EMBED_COLOR)
         await ctx.send(embed=embed)
 
+    # Feature 6: Server Info Stats
+    @commands.command()
+    @has_bot_hierarchy()
+    async def serverinfo(self, ctx):
+        guild = ctx.guild
+        embed = discord.Embed(title=f"{guild.name} Stats", color=EMBED_COLOR)
+        embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
+        embed.add_field(name="Members", value=str(guild.member_count), inline=True)
+        embed.add_field(name="Roles", value=str(len(guild.roles)), inline=True)
+        embed.add_field(name="Channels", value=str(len(guild.channels)), inline=True)
+        embed.add_field(name="Created On", value=guild.created_at.strftime("%Y-%m-%d"), inline=True)
+        await ctx.send(embed=embed)
+
+    # Feature 7: Avatar Viewer
+    @commands.command()
+    @has_bot_hierarchy()
+    async def avatar(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        embed = discord.Embed(title=f"{member.name}'s Avatar", color=EMBED_COLOR)
+        embed.set_image(url=member.display_avatar.url)
+        await ctx.send(embed=embed)
+
+
+class EconomyAndGamble(commands.Cog):
+    def __init__(self, bot): self.bot = bot
+
+    # Feature 8: Daily Reward System
+    @commands.command()
+    @has_bot_hierarchy()
+    async def daily(self, ctx):
+        eco = load_economy()
+        uid = str(ctx.author.id)
+        now = time.time()
+        
+        last_claim = eco.get(uid, {}).get("last_daily", 0)
+        if now - last_claim < 86400:
+            remaining = int((86400 - (now - last_claim)) // 3600)
+            return await ctx.send(f"⏳ Daily reward locked! Try again in `{remaining}h`.")
+
+        user_data = eco.get(uid, {"balance": 0, "last_daily": 0})
+        user_data["balance"] += 250
+        user_data["last_daily"] = now
+        eco[uid] = user_data
+        save_economy(eco)
+        await ctx.send(f"💰 **+{250} coins** added to your balance!")
+
+    # Feature 9: Balance Inspector
+    @commands.command(aliases=["bal"])
+    @has_bot_hierarchy()
+    async def balance(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        eco = load_economy()
+        bal = eco.get(str(member.id), {}).get("balance", 0)
+        await ctx.send(f"💳 **{member.name}** has **{bal} coins**.")
+
+    # Feature 10: Coin Slots Game
+    @commands.command()
+    @has_bot_hierarchy()
+    async def slots(self, ctx, bet: int = 50):
+        eco = load_economy()
+        uid = str(ctx.author.id)
+        user_bal = eco.get(uid, {}).get("balance", 0)
+
+        if bet <= 0 or user_bal < bet:
+            return await ctx.send("❌ Insufficient balance for this bet.")
+
+        emojis = ["🍎", "🍋", "🍒", "💎", "7️⃣"]
+        reel = [random.choice(emojis) for _ in range(3)]
+        
+        if reel[0] == reel[1] == reel[2]:
+            win = bet * 5
+            user_bal += win
+            msg = f"🎰 [{' | '.join(reel)}]\n🎉 **JACKPOT!** You won `{win}` coins!"
+        elif reel[0] == reel[1] or reel[1] == reel[2] or reel[0] == reel[2]:
+            win = bet * 2
+            user_bal += win
+            msg = f"🎰 [{' | '.join(reel)}]\n✨ **Nice!** You won `{win}` coins!"
+        else:
+            user_bal -= bet
+            msg = f"🎰 [{' | '.join(reel)}]\n❌ You lost `{bet}` coins."
+
+        eco.setdefault(uid, {})["balance"] = user_bal
+        save_economy(eco)
+        await ctx.send(msg)
+
 
 class FunAndGames(commands.Cog):
     def __init__(self, bot): self.bot = bot
@@ -655,6 +808,18 @@ class FunAndGames(commands.Cog):
     async def coinflip(self, ctx):
         await ctx.send(f"🪙 Landed on: **{random.choice(['Heads', 'Tails'])}**")
 
+    # Feature 11: Dice Roll
+    @commands.command()
+    @has_bot_hierarchy()
+    async def roll(self, ctx, sides: int = 6):
+        await ctx.send(f"🎲 Rolled: **{random.randint(1, sides)}** (1-{sides})")
+
+    # Feature 12: Reverse Text Tool
+    @commands.command()
+    @has_bot_hierarchy()
+    async def reverse(self, ctx, *, text: str):
+        await ctx.send(text[::-1])
+
 
 class SystemHelp(commands.Cog):
     def __init__(self, bot): self.bot = bot
@@ -663,15 +828,17 @@ class SystemHelp(commands.Cog):
     @has_bot_hierarchy()
     async def help(self, ctx):
         help_text = (
-            "## Command Index (Prefixless)\n\n"
+            "## Prefixless Master Suite\n\n"
             "**🛡️ Management & Trials**\n"
-            "`apply <ign>` • `restrike` • `refresh_recruits` • `leaderboard` • `addtrial <user> [recruiter]` • `pass <user>` • `fail <user> [reason]` • `trials`\n\n"
-            "**🔨 Moderation**\n"
-            "`purge <num>` • `kick <user>` • `ban <user>` • `unban <id>` • `mute <user> <min>` • `unmute <user>` • `nuke` • `lockdown`\n\n"
-            "**⚙️ Utility & 67**\n"
-            "`snipe` • `afk <reason>` • `tag <add/delete/list/get>` • `ping` • `whois <user>` • `lb67`\n\n"
-            "**🎲 Fun**\n"
-            "`ship <user1> [user2]` • `8ball <question>` • `coinflip`\n"
+            "`apply <ign>` • `restrike` • `refresh_recruits` • `leaderboard` • `addtrial <user> [rec]` • `pass <user>` • `fail <user> [reason]` • `trials`\n\n"
+            "**🔨 Moderation & Protection**\n"
+            "`purge <num>` • `kick <user>` • `ban <user>` • `unban <id>` • `mute <user> <min>` • `unmute <user>` • `nuke` • `lockdown` • `slowmode <sec>` • `setnick <user> <nick>` • `addfilter <word>`\n\n"
+            "**⚙️ Utility, Tags & 67**\n"
+            "`snipe` • `editsnipe` • `afk <reason>` • `tag <add/delete/list/get>` • `ping` • `whois <user>` • `lb67` • `serverinfo` • `avatar <user>`\n\n"
+            "**💰 Economy & Casino**\n"
+            "`daily` • `balance [user]` • `slots <bet>`\n\n"
+            "**🎲 Entertainment**\n"
+            "`ship <u1> [u2]` • `8ball <question>` • `coinflip` • `roll [sides]` • `reverse <text>`\n"
         )
         await ctx.send(embed=discord.Embed(description=help_text, color=EMBED_COLOR))
 
@@ -680,7 +847,7 @@ class SystemHelp(commands.Cog):
 # ==========================================
 @tasks.loop(minutes=5)
 async def rotate_status():
-    activities = ["Minecraft", "Recruits", "67 Tracking"]
+    activities = ["Minecraft", "Recruits", "67 Tracking", "Prefixless Utility"]
     await client.change_presence(activity=discord.Game(name=random.choice(activities)))
 
 @tasks.loop(hours=1)
@@ -703,6 +870,7 @@ async def main():
         await client.add_cog(Management(client))
         await client.add_cog(Moderation(client))
         await client.add_cog(UtilityAndTools(client))
+        await client.add_cog(EconomyAndGamble(client))
         await client.add_cog(FunAndGames(client))
         await client.add_cog(SystemHelp(client))
         
