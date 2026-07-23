@@ -42,10 +42,6 @@ ROLE_TRIAL_AS = "[+] Trial AS"
 ROLE_TRIAL_EU = "[+] Trial EU"
 ROLE_OFFICIAL_MEMBER = "[+] Member"
 
-# Welcome message settings
-WELCOME_CHANNEL_NAME = "welcome"   # change this to whatever your welcome channel is named
-WELCOME_SERVER_NAME = "Heaven"     # the name shown in the welcome embed
-
 # In-Memory Caches & States
 sniped_messages = {}
 edited_sniped_messages = {}
@@ -153,29 +149,6 @@ class CloseTicketView(discord.ui.View):
         await channel.delete()
 
 # (All other Views are included in the saved file)
-
-# ==========================================
-# EVENTS - WELCOME MESSAGE
-# ==========================================
-@client.event
-async def on_member_join(member: discord.Member):
-    guild = member.guild
-
-    channel = discord.utils.get(guild.text_channels, name=WELCOME_CHANNEL_NAME)
-    if channel is None:
-        return  # no welcome channel found, skip silently
-
-    embed = discord.Embed(
-        description=f"welc @ **{WELCOME_SERVER_NAME}**",
-        color=EMBED_COLOR
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.set_footer(text=f"{guild.member_count}th")
-
-    try:
-        await channel.send(content=member.mention, embed=embed)
-    except discord.Forbidden:
-        pass  # bot doesn't have permission to send in that channel
 
 # ==========================================
 # COGS
