@@ -139,6 +139,21 @@ async def on_member_join(member):
             except discord.Forbidden:
                 pass
 
+    # Enhanced Welcome Message (Heaven / Angel Theme)
+    try:
+        chat_channel = discord.utils.get(member.guild.text_channels, name="﹒💬︲chat")
+        if chat_channel:
+            member_count = member.guild.member_count
+            welcome_embed = discord.Embed(
+                title="✧ Welcome to Heaven ✧",
+                description=f"**{member.mention}**, you are the **{member_count}th** angel to join our divine realm.\n\nMay your light shine brightly among us.",
+                color=0x9b59b6  # Soft angelic purple
+            )
+            welcome_embed.set_footer(text="Heaven Discord • Embrace the light")
+            await chat_channel.send(f"{member.mention}", embed=welcome_embed)
+    except Exception:
+        pass  # Silently fail if channel missing or permissions issue
+
 @client.event
 async def on_message_delete(message):
     if message.author.bot:
@@ -647,6 +662,31 @@ class Moderation(commands.Cog):
             except Exception:
                 break  # Stop if any reaction fails
 
+    # New Test Welcome Command (prefixless, admin-only)
+    @commands.command(name="testwelcome")
+    @has_bot_hierarchy()
+    async def testwelcome(self, ctx, member: discord.Member = None):
+        """Test the welcome message (Admin only)."""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("❌ Only administrators can use this command.", delete_after=5)
+        
+        target = member or ctx.author
+        member_count = ctx.guild.member_count
+        chat_channel = discord.utils.get(ctx.guild.text_channels, name="﹒💬︲chat")
+        
+        if not chat_channel:
+            return await ctx.send("❌ Welcome channel `﹒💬︲chat` not found.", delete_after=5)
+        
+        welcome_embed = discord.Embed(
+            title="✧ Welcome to Heaven ✧",
+            description=f"**{target.mention}**, you are the **{member_count}th** angel to join our divine realm.\n\nMay your light shine brightly among us.",
+            color=0x9b59b6
+        )
+        welcome_embed.set_footer(text="Heaven Discord • Test Welcome")
+        
+        await chat_channel.send(f"{target.mention}", embed=welcome_embed)
+        await ctx.send(f"✅ Test welcome message sent for **{target.name}** in the chat channel.", delete_after=5)
+
 
 class UtilityAndTools(commands.Cog):
     def __init__(self, bot): self.bot = bot
@@ -759,27 +799,6 @@ class UtilityAndTools(commands.Cog):
         embed.set_image(url=member.display_avatar.url)
         await ctx.send(embed=embed)
 
-    # NEW FEATURE: welcome - Cool niche welcome embed for Heaven server (mimicking provided image style)
-    @commands.command()
-    @has_bot_hierarchy()
-    async def welcome(self, ctx):
-        """Sends a cool niche welcome embed styled after the provided image for the Heaven server."""
-        embed = discord.Embed(
-            description="**welc @ Invaders**\n\n**law . news . self**\n\n**1901th**",
-            color=EMBED_COLOR
-        )
-        embed.set_author(
-            name="Heaven",
-            icon_url=ctx.guild.icon.url if ctx.guild.icon else None
-        )
-        # Eye / intense visual (using a thematic placeholder; replace URL with your preferred public eye image if desired)
-        embed.set_image(url="https://i.imgur.com/2wtO0.jpg")  # Note: In production, host the eye image publicly or use attachment
-        embed.set_footer(text="Heaven • Welcome to the fold")
-        embed.timestamp = datetime.utcnow()
-        
-        # Mimic the dark aesthetic + right-side visual
-        await ctx.send(embed=embed)
-
 
 class EconomyAndGamble(commands.Cog):
     def __init__(self, bot): self.bot = bot
@@ -890,13 +909,16 @@ class SystemHelp(commands.Cog):
             "**🛡️ Management & Trials**\n"
             "`apply <ign>` • `restrike` • `refresh_recruits` • `leaderboard` • `addtrial <user> [rec]` • `pass <user>` • `fail <user> [reason]` • `trials`\n\n"
             "**🔨 Moderation & Protection**\n"
-            "`purge <num>` • `kick <user>` • `ban <user>` • `unban <id>` • `mute <user> <min>` • `unmute <user>` • `nuke` • `lockdown` • `slowmode <sec>` • `setnick <user> <nick>` • `addfilter <word>` • `poll <question> | <opt1> | <opt2> ...`\n\n"
+            "`purge <num>` • `kick <user>` • `ban <user>` • `unban <id>` • `mute <user> <min>` • `unmute <user>` • `nuke` • `lockdown` • `slowmode <sec>` • `setnick <user> <nick>` • `addfilter <word>` • `poll <question> | <opt1> | <opt2> ...` • `testwelcome [user]`\n\n"
             "**⚙️ Utility, Tags & 67**\n"
-            "`snipe` • `editsnipe` • `afk <reason>` • `tag <add/delete/list/get>` • `ping` • `whois <user>` • `lb67` • `serverinfo` • `avatar <user>` • `welcome`\n\n"
+            "`snipe` • `editsnipe` • `afk <reason>` • `tag <add/delete/list/get>` • `ping` • `whois <user>` • `lb67` • `serverinfo` • `avatar <user>`\n\n"
             "**💰 Economy & Casino**\n"
             "`daily` • `balance [user]` • `slots <bet>`\n\n"
             "**🎲 Entertainment**\n"
-            "`ship <u1> [u2]` • `8ball <question>` • `coinflip` • `roll [sides]` • `reverse <text>`\n"
+            "`ship <u1> [u2]` • `8ball <question>` • `coinflip` • `roll [sides]` • `reverse <text>`\n\n"
+            "**✧ Welcome System**\n"
+            "Automatic welcome on join (pings in `﹒💬︲chat`)\n"
+            "`testwelcome [user]` - Test welcome message (Admin)"
         )
         await ctx.send(embed=discord.Embed(description=help_text, color=EMBED_COLOR))
 
