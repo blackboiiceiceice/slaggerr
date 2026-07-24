@@ -139,17 +139,17 @@ async def on_member_join(member):
             except discord.Forbidden:
                 pass
 
-    # Enhanced Welcome Message (Heaven / Angel Theme)
+    # Clean Welcome Message
     try:
         chat_channel = discord.utils.get(member.guild.text_channels, name="﹒💬︲chat")
         if chat_channel:
             member_count = member.guild.member_count
             welcome_embed = discord.Embed(
-                title="✧ Welcome to Heaven ✧",
-                description=f"**{member.mention}**, you are the **{member_count}th** angel to join our divine realm.\n\nMay your light shine brightly among us.",
-                color=0x9b59b6  # Soft angelic purple
+                title="Welcome to Heaven",
+                description=f"{member.mention} — you're the **{member_count}th** member to join.",
+                color=EMBED_COLOR
             )
-            welcome_embed.set_footer(text="Heaven Discord • Embrace the light")
+            welcome_embed.set_footer(text="Heaven Discord")
             await chat_channel.send(f"{member.mention}", embed=welcome_embed)
     except Exception:
         pass  # Silently fail if channel missing or permissions issue
@@ -678,11 +678,11 @@ class Moderation(commands.Cog):
             return await ctx.send("❌ Welcome channel `﹒💬︲chat` not found.", delete_after=5)
         
         welcome_embed = discord.Embed(
-            title="✧ Welcome to Heaven ✧",
-            description=f"**{target.mention}**, you are the **{member_count}th** angel to join our divine realm.\n\nMay your light shine brightly among us.",
-            color=0x9b59b6
+            title="Welcome to Heaven",
+            description=f"{target.mention} — you're the **{member_count}th** member to join.",
+            color=EMBED_COLOR
         )
-        welcome_embed.set_footer(text="Heaven Discord • Test Welcome")
+        welcome_embed.set_footer(text="Heaven Discord")
         
         await chat_channel.send(f"{target.mention}", embed=welcome_embed)
         await ctx.send(f"✅ Test welcome message sent for **{target.name}** in the chat channel.", delete_after=5)
