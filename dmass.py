@@ -759,6 +759,27 @@ class UtilityAndTools(commands.Cog):
         embed.set_image(url=member.display_avatar.url)
         await ctx.send(embed=embed)
 
+    # NEW FEATURE: welcome - Cool niche welcome embed for Heaven server (mimicking provided image style)
+    @commands.command()
+    @has_bot_hierarchy()
+    async def welcome(self, ctx):
+        """Sends a cool niche welcome embed styled after the provided image for the Heaven server."""
+        embed = discord.Embed(
+            description="**welc @ Invaders**\n\n**law . news . self**\n\n**1901th**",
+            color=EMBED_COLOR
+        )
+        embed.set_author(
+            name="Heaven",
+            icon_url=ctx.guild.icon.url if ctx.guild.icon else None
+        )
+        # Eye / intense visual (using a thematic placeholder; replace URL with your preferred public eye image if desired)
+        embed.set_image(url="https://i.imgur.com/2wtO0.jpg")  # Note: In production, host the eye image publicly or use attachment
+        embed.set_footer(text="Heaven • Welcome to the fold")
+        embed.timestamp = datetime.utcnow()
+        
+        # Mimic the dark aesthetic + right-side visual
+        await ctx.send(embed=embed)
+
 
 class EconomyAndGamble(commands.Cog):
     def __init__(self, bot): self.bot = bot
@@ -871,7 +892,7 @@ class SystemHelp(commands.Cog):
             "**🔨 Moderation & Protection**\n"
             "`purge <num>` • `kick <user>` • `ban <user>` • `unban <id>` • `mute <user> <min>` • `unmute <user>` • `nuke` • `lockdown` • `slowmode <sec>` • `setnick <user> <nick>` • `addfilter <word>` • `poll <question> | <opt1> | <opt2> ...`\n\n"
             "**⚙️ Utility, Tags & 67**\n"
-            "`snipe` • `editsnipe` • `afk <reason>` • `tag <add/delete/list/get>` • `ping` • `whois <user>` • `lb67` • `serverinfo` • `avatar <user>`\n\n"
+            "`snipe` • `editsnipe` • `afk <reason>` • `tag <add/delete/list/get>` • `ping` • `whois <user>` • `lb67` • `serverinfo` • `avatar <user>` • `welcome`\n\n"
             "**💰 Economy & Casino**\n"
             "`daily` • `balance [user]` • `slots <bet>`\n\n"
             "**🎲 Entertainment**\n"
