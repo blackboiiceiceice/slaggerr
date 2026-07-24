@@ -610,6 +610,43 @@ class Moderation(commands.Cog):
         else:
             await ctx.send("Word is already filtered.")
 
+    # NEW FEATURE: Poll (Niche Embed Poll)
+    @commands.command()
+    @has_bot_hierarchy()
+    async def poll(self, ctx, *, args: str = None):
+        """Create a nice embed poll. Usage: poll Question here | Option 1 | Option 2 | Option 3"""
+        if not args:
+            return await ctx.send("**Usage:** `poll <question> | <option1> | <option2> [| ...]`\nUp to 10 options supported.", delete_after=10)
+        
+        parts = [part.strip() for part in args.split('|')]
+        if len(parts) < 2:
+            return await ctx.send("❌ Please provide a question and at least one option. Example: `poll Favorite color? | Red | Blue | Green`", delete_after=8)
+        
+        question = parts[0]
+        options = parts[1:]
+        
+        if len(options) > 10:
+            options = options[:10]
+            await ctx.send("⚠️ Limited to 10 options.", delete_after=5)
+        
+        embed = discord.Embed(title="📊 Poll", description=question, color=EMBED_COLOR)
+        embed.set_footer(text=f"Poll created by {ctx.author.display_name} • React to vote")
+        
+        for i, option in enumerate(options, 1):
+            embed.add_field(name=f"**Option {i}**", value=option, inline=False)
+        
+        msg = await ctx.send(embed=embed)
+        
+        # Add numbered reactions
+        reaction_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+        for i in range(len(options)):
+            try:
+                await msg.add_reaction(reaction_emojis[i])
+            except discord.Forbidden:
+                pass
+            except Exception:
+                break  # Stop if any reaction fails
+
 
 class UtilityAndTools(commands.Cog):
     def __init__(self, bot): self.bot = bot
@@ -832,7 +869,7 @@ class SystemHelp(commands.Cog):
             "**🛡️ Management & Trials**\n"
             "`apply <ign>` • `restrike` • `refresh_recruits` • `leaderboard` • `addtrial <user> [rec]` • `pass <user>` • `fail <user> [reason]` • `trials`\n\n"
             "**🔨 Moderation & Protection**\n"
-            "`purge <num>` • `kick <user>` • `ban <user>` • `unban <id>` • `mute <user> <min>` • `unmute <user>` • `nuke` • `lockdown` • `slowmode <sec>` • `setnick <user> <nick>` • `addfilter <word>`\n\n"
+            "`purge <num>` • `kick <user>` • `ban <user>` • `unban <id>` • `mute <user> <min>` • `unmute <user>` • `nuke` • `lockdown` • `slowmode <sec>` • `setnick <user> <nick>` • `addfilter <word>` • `poll <question> | <opt1> | <opt2> ...`\n\n"
             "**⚙️ Utility, Tags & 67**\n"
             "`snipe` • `editsnipe` • `afk <reason>` • `tag <add/delete/list/get>` • `ping` • `whois <user>` • `lb67` • `serverinfo` • `avatar <user>`\n\n"
             "**💰 Economy & Casino**\n"
