@@ -625,6 +625,40 @@ class Moderation(commands.Cog):
         else:
             await ctx.send("Word is already filtered.")
 
+    # NEW FEATURE: filter (moderation command - admin only)
+    @commands.command()
+    async def filter(self, ctx, action: str = None, *, word: str = None):
+        """Manage chat filter. Usage: filter add <word> | filter remove <word> | filter list"""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("❌ Only administrators can manage the chat filter.", delete_after=5)
+        
+        if action == "add" and word:
+            words = load_filter_words()
+            w = word.lower().strip()
+            if w not in words:
+                words.append(w)
+                save_filter_words(words)
+                await ctx.send(f"✅ Added `{w}` to the chat filter.")
+            else:
+                await ctx.send("Word is already filtered.")
+        elif action == "remove" and word:
+            words = load_filter_words()
+            w = word.lower().strip()
+            if w in words:
+                words.remove(w)
+                save_filter_words(words)
+                await ctx.send(f"✅ Removed `{w}` from the chat filter.")
+            else:
+                await ctx.send("Word not found in filter.")
+        elif action == "list":
+            words = load_filter_words()
+            if not words:
+                await ctx.send("No filtered words.")
+            else:
+                await ctx.send(f"**Filtered words:** {', '.join(f'`{w}`' for w in words)}")
+        else:
+            await ctx.send("**Usage:** `filter add <word>` | `filter remove <word>` | `filter list`")
+
     # NEW FEATURE: Poll (Niche Embed Poll)
     @commands.command()
     @has_bot_hierarchy()
@@ -747,12 +781,10 @@ class UtilityAndTools(commands.Cog):
             await ctx.send("Usage: `tag add <name> <content>` | `tag delete <name>` | `tag list` | `tag <name>`")
 
     @commands.command()
-    @has_bot_hierarchy()
     async def ping(self, ctx):
         await ctx.send(f"🏓 `{round(self.bot.latency * 1000)}ms`")
 
     @commands.command()
-    @has_bot_hierarchy()
     async def whois(self, ctx, member: discord.Member = None):
         member = member or ctx.author
         roles = [r.mention for r in member.roles[1:]]
@@ -792,7 +824,6 @@ class UtilityAndTools(commands.Cog):
 
     # Feature 7: Avatar Viewer
     @commands.command()
-    @has_bot_hierarchy()
     async def avatar(self, ctx, member: discord.Member = None):
         member = member or ctx.author
         embed = discord.Embed(title=f"{member.name}'s Avatar", color=EMBED_COLOR)
@@ -867,7 +898,6 @@ class FunAndGames(commands.Cog):
     def __init__(self, bot): self.bot = bot
 
     @commands.command()
-    @has_bot_hierarchy()
     async def ship(self, ctx, u1: discord.Member, u2: discord.Member = None):
         u2 = u2 or ctx.author
         percent = random.randint(0, 100)
@@ -875,25 +905,21 @@ class FunAndGames(commands.Cog):
         await ctx.send(f"❤️ **{u1.name}** x **{u2.name}** = **{name}** (`{percent}%` match)")
 
     @commands.command(name="8ball")
-    @has_bot_hierarchy()
     async def eightball(self, ctx, *, question: str):
         answers = ["Yes.", "No.", "Definitely.", "Ask again later.", "Unlikely."]
         await ctx.send(f"❓ `{question}`\n🔮 **{random.choice(answers)}**")
 
     @commands.command()
-    @has_bot_hierarchy()
     async def coinflip(self, ctx):
         await ctx.send(f"🪙 Landed on: **{random.choice(['Heads', 'Tails'])}**")
 
     # Feature 11: Dice Roll
     @commands.command()
-    @has_bot_hierarchy()
     async def roll(self, ctx, sides: int = 6):
         await ctx.send(f"🎲 Rolled: **{random.randint(1, sides)}** (1-{sides})")
 
     # Feature 12: Reverse Text Tool
     @commands.command()
-    @has_bot_hierarchy()
     async def reverse(self, ctx, *, text: str):
         await ctx.send(text[::-1])
 
@@ -909,7 +935,7 @@ class SystemHelp(commands.Cog):
             "**🛡️ Management & Trials**\n"
             "`apply <ign>` • `restrike` • `refresh_recruits` • `leaderboard` • `addtrial <user> [rec]` • `pass <user>` • `fail <user> [reason]` • `trials`\n\n"
             "**🔨 Moderation & Protection**\n"
-            "`purge <num>` • `kick <user>` • `ban <user>` • `unban <id>` • `mute <user> <min>` • `unmute <user>` • `nuke` • `lockdown` • `slowmode <sec>` • `setnick <user> <nick>` • `addfilter <word>` • `poll <question> | <opt1> | <opt2> ...` • `testwelcome [user]`\n\n"
+            "`purge <num>` • `kick <user>` • `ban <user>` • `unban <id>` • `mute <user> <min>` • `unmute <user>` • `nuke` • `lockdown` • `slowmode <sec>` • `setnick <user> <nick>` • `addfilter <word>` • `filter add/remove/list` • `poll <question> | <opt1> | <opt2> ...` • `testwelcome [user]`\n\n"
             "**⚙️ Utility, Tags & 67**\n"
             "`snipe` • `editsnipe` • `afk <reason>` • `tag <add/delete/list/get>` • `ping` • `whois <user>` • `lb67` • `serverinfo` • `avatar <user>`\n\n"
             "**💰 Economy & Casino**\n"
