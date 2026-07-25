@@ -834,9 +834,8 @@ class UtilityAndTools(commands.Cog):
 class EconomyAndGamble(commands.Cog):
     def __init__(self, bot): self.bot = bot
 
-    # Feature 8: Daily Reward System
+    # Feature 8: Daily Reward System (open to everyone)
     @commands.command()
-    @has_bot_hierarchy()
     async def daily(self, ctx):
         eco = load_economy()
         uid = str(ctx.author.id)
@@ -854,18 +853,16 @@ class EconomyAndGamble(commands.Cog):
         save_economy(eco)
         await ctx.send(f"💰 **+{250} coins** added to your balance!")
 
-    # Feature 9: Balance Inspector
+    # Feature 9: Balance Inspector (open to everyone)
     @commands.command(aliases=["bal"])
-    @has_bot_hierarchy()
     async def balance(self, ctx, member: discord.Member = None):
         member = member or ctx.author
         eco = load_economy()
         bal = eco.get(str(member.id), {}).get("balance", 0)
         await ctx.send(f"💳 **{member.name}** has **{bal} coins**.")
 
-    # Feature 10: Coin Slots Game
+    # Feature 10: CoinSlots Game (open to everyone)
     @commands.command()
-    @has_bot_hierarchy()
     async def slots(self, ctx, bet: int = 50):
         eco = load_economy()
         uid = str(ctx.author.id)
