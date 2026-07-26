@@ -35,7 +35,7 @@ SLOWMODE_FILE = "slowmode_settings.json"
 AUTOROLES_FILE = "autoroles.json"
 
 # Role & Channel Names
-TARGET_ROLE_NAME = "︲ Recruiter"
+TARGET_ROLE_NAME = "[✦] Recruiter"
 STAFF_ROLE_NAME = "[•] Ticket Perms"
 ROLE_TRIAL_MEMBER = "[+] Trial Member"
 ROLE_TRIAL_AS = "[+] Trial AS"
@@ -50,7 +50,7 @@ afk_users = {}
 SERVER_LOCKDOWN_STATUS = False
 SLOWMODE_ACTIVE = False
 active_polls = {}
-last_dictator_ping = 0  # cooldown tracker for "dictator"
+last_bwa = 0  # 2 second cooldown for bwa
 
 # ==========================================
 # 2. HIERARCHY & PERMISSION CHECK
@@ -237,35 +237,41 @@ async def on_message(message):
 
     # ========== UNIQUE KEYWORD TRIGGERS ==========
 
-    # "dictator" → pings wrierrr (15s cooldown)
-    global last_dictator_ping
-    if "dictator" in content_lower:
-        now = time.time()
-        if now - last_dictator_ping >= 15:
-            target = discord.utils.find(
-                lambda m: m.name.lower() == "wrierrr" or m.display_name.lower() == "wrierrr",
-                message.guild.members
-            )
-            if target:
-                await message.channel.send(f"📢 The dictator has been summoned → {target.mention}")
-                last_dictator_ping = now
-            else:
-                await message.channel.send("Dictator is offline... for now.", delete_after=4)
-        # silent cooldown if still on cooldown
-
-    # "bwa" → sends the legendary gif
+    # "bwa" → replies to the message with the gif (2 second cooldown)
+    global last_bwa
     if re.search(r'\bbwa\b', content_lower):
-        await message.channel.send("https://tenor.com/bghjJmsFBb0.gif")
+        now = time.time()
+        if now - last_bwa >= 2:
+            try:
+                await message.reply("https://tenor.com/bghjJmsFBb0.gif")
+                last_bwa = now
+            except discord.Forbidden:
+                await message.channel.send("https://tenor.com/bghjJmsFBb0.gif")
 
     # Extra niche triggers
     if re.search(r'\bsus\b', content_lower):
         await message.add_reaction("ඞ")
 
     if "based" in content_lower:
-        await message.channel.send("based on what?", delete_after=6)
+        await message.reply("based on what?", delete_after=6)
 
     if "ratio" in content_lower:
         await message.add_reaction("📉")
+
+    if re.search(r'\bskibidi\b', content_lower):
+        await message.add_reaction("🚽")
+
+    if "ohio" in content_lower:
+        await message.reply("only in ohio 💀", delete_after=5)
+
+    if re.search(r'\bcook\b', content_lower) and "let him" not in content_lower:
+        await message.add_reaction("🔥")
+
+    if "cap" in content_lower:
+        await message.add_reaction("🧢")
+
+    if "no cap" in content_lower:
+        await message.add_reaction("✅")
 
     await client.process_commands(message)
 
@@ -1033,7 +1039,7 @@ class FunAndGames(commands.Cog):
     async def reverse(self, ctx, *, text: str):
         await ctx.send(text[::-1])
 
-    # ========== 20+ FUN FEATURES (everyone can use) ==========
+    # ========== FUN FEATURES (everyone can use) ==========
 
     @commands.command()
     async def joke(self, ctx):
@@ -1293,6 +1299,24 @@ class FunAndGames(commands.Cog):
         member = member or ctx.author
         await ctx.send(f"👨‍🍳 **{member.display_name}** is cooking... 🔥\n*{random.choice(['absolute cinema', 'let him cook', 'he cooked too hard', 'burnt the kitchen', 'masterchef energy'])}*")
 
+    @commands.command()
+    async def simp(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        percent = random.randint(0, 100)
+        await ctx.send(f"🥺 **{member.display_name}** is **{percent}%** simp")
+
+    @commands.command()
+    async def sigma(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        levels = ["baby sigma", "mid sigma", "sigma male", "gigachad sigma", "ultimate sigma"]
+        await ctx.send(f"🗿 **{member.display_name}** is a **{random.choice(levels)}**")
+
+    @commands.command()
+    async def rizz(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        score = random.randint(0, 100)
+        await ctx.send(f"😏 **{member.display_name}** has **{score}** rizz")
+
 
 class SystemHelp(commands.Cog):
     def __init__(self, bot): self.bot = bot
@@ -1315,13 +1339,16 @@ class SystemHelp(commands.Cog):
             "`joke` • `fact` • `quote` • `compliment [user]` • `roast [user]` • `rps <rock/paper/scissors>`\n"
             "`rate <thing>` • `choose a or b` • `wyr` • `truth` • `dare` • `mock <text>` • `uwu <text>`\n"
             "`clap <text>` • `say <text>` • `howgay [user]` • `howhot [user]` • `iq [user]` • `pp [user]`\n"
-            "`randomnumber [min] [max]` • `password [length]` • `aura [user]` • `vibe [user]` • `cook [user]`\n\n"
+            "`randomnumber [min] [max]` • `password [length]` • `aura [user]` • `vibe [user]` • `cook [user]`\n"
+            "`simp [user]` • `sigma [user]` • `rizz [user]`\n\n"
             "**⚡ Keyword Triggers (auto)**\n"
-            "`dictator` → pings @wrierrr (15s cooldown)\n"
-            "`bwa` → sends the legendary gif\n"
+            "`bwa` → replies with the legendary gif (2s cooldown)\n"
             "`sus` → reacts with ඞ\n"
             "`based` → replies \"based on what?\"\n"
-            "`ratio` → reacts 📉\n\n"
+            "`ratio` → reacts 📉\n"
+            "`skibidi` → reacts 🚽\n"
+            "`ohio` → replies \"only in ohio 💀\"\n"
+            "`cap` → reacts 🧢 • `no cap` → reacts ✅\n\n"
             "**✧ Welcome System**\n"
             "Automatic welcome on join (pings in `﹒💬︲chat`)\n"
             "`testwelcome [user]` - Test welcome message (Admin)"
