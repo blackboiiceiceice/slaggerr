@@ -581,15 +581,6 @@ class Moderation(commands.Cog):
 
     @commands.command()
     @has_bot_hierarchy()
-    async def nuke(self, ctx):
-        pos = ctx.channel.position
-        new_channel = await ctx.channel.clone(reason="Nuke command executed")
-        await ctx.channel.delete()
-        await new_channel.edit(position=pos)
-        await new_channel.send("💥 Channel recreations complete.")
-
-    @commands.command()
-    @has_bot_hierarchy()
     async def lockdown(self, ctx):
         global SERVER_LOCKDOWN_STATUS
         SERVER_LOCKDOWN_STATUS = not SERVER_LOCKDOWN_STATUS
@@ -920,6 +911,240 @@ class FunAndGames(commands.Cog):
     async def reverse(self, ctx, *, text: str):
         await ctx.send(text[::-1])
 
+    # ========== 20 NEW FUN FEATURES (everyone can use) ==========
+
+    @commands.command()
+    async def joke(self, ctx):
+        jokes = [
+            "Why don't scientists trust atoms? Because they make up everything!",
+            "Why did the scarecrow win an award? He was outstanding in his field.",
+            "I told my wife she was drawing her eyebrows too high. She looked surprised.",
+            "Why don't eggs tell jokes? They'd crack each other up.",
+            "What do you call a fake noodle? An impasta.",
+            "Why did the math book look so sad? Because it had too many problems.",
+            "I'm reading a book about anti-gravity. It's impossible to put down!",
+            "What do you call cheese that isn't yours? Nacho cheese.",
+            "Why couldn't the bicycle stand up by itself? It was two tired.",
+            "What do you call a bear with no teeth? A gummy bear."
+        ]
+        await ctx.send(f"😂 {random.choice(jokes)}")
+
+    @commands.command()
+    async def fact(self, ctx):
+        facts = [
+            "Honey never spoils. Archaeologists have found 3000-year-old honey that's still edible.",
+            "Octopuses have three hearts.",
+            "A day on Venus is longer than a year on Venus.",
+            "Bananas are berries, but strawberries aren't.",
+            "Sharks are older than trees.",
+            "There are more stars in the universe than grains of sand on Earth.",
+            "Wombat poop is cube-shaped.",
+            "A group of flamingos is called a flamboyance.",
+            "The shortest war in history lasted 38 minutes.",
+            "Cows have best friends and get stressed when separated."
+        ]
+        await ctx.send(f"🧠 **Fun Fact:** {random.choice(facts)}")
+
+    @commands.command()
+    async def quote(self, ctx):
+        quotes = [
+            "\"The only way to do great work is to love what you do.\" – Steve Jobs",
+            "\"In the middle of every difficulty lies opportunity.\" – Albert Einstein",
+            "\"Be yourself; everyone else is already taken.\" – Oscar Wilde",
+            "\"You miss 100% of the shots you don't take.\" – Wayne Gretzky",
+            "\"It does not matter how slowly you go as long as you do not stop.\" – Confucius",
+            "\"The best time to plant a tree was 20 years ago. The second best time is now.\" – Chinese Proverb",
+            "\"Stay hungry, stay foolish.\" – Steve Jobs",
+            "\"Life is what happens when you're busy making other plans.\" – John Lennon",
+            "\"Success is not final, failure is not fatal.\" – Winston Churchill",
+            "\"The only limit to our realization of tomorrow is our doubts of today.\" – FDR"
+        ]
+        await ctx.send(f"📜 {random.choice(quotes)}")
+
+    @commands.command()
+    async def compliment(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        compliments = [
+            "You're looking absolutely fire today 🔥",
+            "Your vibe is unmatched.",
+            "You make this server better just by existing.",
+            "You're smarter than you give yourself credit for.",
+            "You have great taste.",
+            "You're one of the real ones.",
+            "Your energy is contagious (in a good way).",
+            "You're cooler than a polar bear's toenails.",
+            "The world needs more people like you.",
+            "You're doing amazing, keep it up."
+        ]
+        await ctx.send(f"✨ {member.mention} — {random.choice(compliments)}")
+
+    @commands.command()
+    async def roast(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        roasts = [
+            "You're the human version of a participation trophy.",
+            "If I wanted to hear from an idiot, I'd turn on the news.",
+            "You're not stupid, you just have bad luck thinking.",
+            "I'd agree with you but then we'd both be wrong.",
+            "You're the reason the gene pool needs a lifeguard.",
+            "Somewhere out there is a tree working hard to replace the oxygen you waste.",
+            "You're like a cloud. When you disappear, it's a beautiful day.",
+            "I'd call you a tool, but that implies you're useful.",
+            "You bring everyone so much joy... when you leave the room.",
+            "Your secrets are safe with me. I wasn't even listening."
+        ]
+        await ctx.send(f"🔥 {member.mention} — {random.choice(roasts)}")
+
+    @commands.command()
+    async def rps(self, ctx, choice: str = None):
+        if not choice or choice.lower() not in ["rock", "paper", "scissors"]:
+            return await ctx.send("Usage: `rps <rock/paper/scissors>`")
+        user = choice.lower()
+        bot = random.choice(["rock", "paper", "scissors"])
+        if user == bot:
+            result = "It's a tie!"
+        elif (user == "rock" and bot == "scissors") or (user == "paper" and bot == "rock") or (user == "scissors" and bot == "paper"):
+            result = "You win!"
+        else:
+            result = "I win!"
+        await ctx.send(f"🪨📄✂️ You chose **{user}**, I chose **{bot}**.\n**{result}**")
+
+    @commands.command()
+    async def rate(self, ctx, *, thing: str = None):
+        if not thing:
+            return await ctx.send("Usage: `rate <something>`")
+        score = random.randint(0, 10)
+        await ctx.send(f"📊 I rate **{thing}** a solid **{score}/10**")
+
+    @commands.command()
+    async def choose(self, ctx, *, options: str = None):
+        if not options or " or " not in options.lower():
+            return await ctx.send("Usage: `choose option1 or option2`")
+        parts = re.split(r'\s+or\s+', options, flags=re.IGNORECASE)
+        if len(parts) < 2:
+            return await ctx.send("Give me at least two options separated by 'or'.")
+        pick = random.choice(parts).strip()
+        await ctx.send(f"🤔 I choose: **{pick}**")
+
+    @commands.command()
+    async def wyr(self, ctx):
+        questions = [
+            "Would you rather be able to fly or be invisible?",
+            "Would you rather fight 100 duck-sized horses or 1 horse-sized duck?",
+            "Would you rather always be 10 minutes late or 20 minutes early?",
+            "Would you rather have unlimited money or unlimited time?",
+            "Would you rather never use social media again or never watch another movie/TV show?",
+            "Would you rather be famous or be the best friend of someone famous?",
+            "Would you rather live without music or without movies?",
+            "Would you rather have a rewind button or a pause button for your life?",
+            "Would you rather always have to say everything on your mind or never speak again?",
+            "Would you rather be able to talk to animals or speak all human languages?"
+        ]
+        await ctx.send(f"🔀 **Would You Rather:**\n{random.choice(questions)}")
+
+    @commands.command()
+    async def truth(self, ctx):
+        truths = [
+            "What's the most embarrassing thing you've ever done?",
+            "What's a secret you've never told anyone in this server?",
+            "Who was your first crush?",
+            "What's the worst gift you've ever received?",
+            "Have you ever cheated on a test?",
+            "What's your biggest fear?",
+            "What's the last lie you told?",
+            "Who in this server would you want to switch lives with for a day?",
+            "What's something you're glad your parents don't know about you?",
+            "What's your most used emoji and why?"
+        ]
+        await ctx.send(f"🗣️ **Truth:** {random.choice(truths)}")
+
+    @commands.command()
+    async def dare(self, ctx):
+        dares = [
+            "Send a random emoji in the next 5 messages.",
+            "Change your nickname to something funny for 10 minutes.",
+            "Compliment the next person who talks in chat.",
+            "Say the alphabet backwards as fast as you can.",
+            "Post a selfie in chat (or a funny reaction image).",
+            "Speak only in questions for the next 5 minutes.",
+            "Let someone else choose your next status.",
+            "Tell a joke in the voice chat if you're in one.",
+            "React to the last 10 messages with the same emoji.",
+            "Write a short poem about the person above you."
+        ]
+        await ctx.send(f"😈 **Dare:** {random.choice(dares)}")
+
+    @commands.command()
+    async def mock(self, ctx, *, text: str = None):
+        if not text:
+            return await ctx.send("Usage: `mock <text>`")
+        mocked = "".join(c.upper() if i % 2 else c.lower() for i, c in enumerate(text))
+        await ctx.send(mocked)
+
+    @commands.command()
+    async def uwu(self, ctx, *, text: str = None):
+        if not text:
+            return await ctx.send("Usage: `uwu <text>`")
+        uwu_text = text.replace("r", "w").replace("l", "w").replace("R", "W").replace("L", "W")
+        uwu_text = uwu_text.replace("no", "nyo").replace("No", "Nyo")
+        await ctx.send(f"{uwu_text} uwu")
+
+    @commands.command()
+    async def clap(self, ctx, *, text: str = None):
+        if not text:
+            return await ctx.send("Usage: `clap <text>`")
+        clapped = " 👏 ".join(text.split())
+        await ctx.send(clapped)
+
+    @commands.command()
+    async def say(self, ctx, *, text: str = None):
+        if not text:
+            return await ctx.send("Usage: `say <text>`")
+        try:
+            await ctx.message.delete()
+        except:
+            pass
+        await ctx.send(text)
+
+    @commands.command()
+    async def howgay(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        percent = random.randint(0, 100)
+        await ctx.send(f"🏳️‍🌈 **{member.display_name}** is **{percent}%** gay")
+
+    @commands.command()
+    async def howhot(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        percent = random.randint(0, 100)
+        await ctx.send(f"🔥 **{member.display_name}** is **{percent}%** hot")
+
+    @commands.command()
+    async def iq(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        score = random.randint(50, 160)
+        await ctx.send(f"🧠 **{member.display_name}**'s IQ is **{score}**")
+
+    @commands.command()
+    async def pp(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        length = random.randint(1, 15)
+        await ctx.send(f"🍆 **{member.display_name}**'s pp: 8{'=' * length}D")
+
+    @commands.command()
+    async def randomnumber(self, ctx, minimum: int = 1, maximum: int = 100):
+        if minimum > maximum:
+            minimum, maximum = maximum, minimum
+        num = random.randint(minimum, maximum)
+        await ctx.send(f"🎲 Random number between {minimum} and {maximum}: **{num}**")
+
+    @commands.command()
+    async def password(self, ctx, length: int = 12):
+        if length < 4 or length > 50:
+            return await ctx.send("Length must be between 4 and 50.")
+        chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+        pwd = "".join(random.choice(chars) for _ in range(length))
+        await ctx.send(f"🔐 Here's a random password: `{pwd}`", delete_after=30)
+
 
 class SystemHelp(commands.Cog):
     def __init__(self, bot): self.bot = bot
@@ -932,13 +1157,17 @@ class SystemHelp(commands.Cog):
             "**🛡️ Management & Trials**\n"
             "`apply <ign>` • `restrike` • `refresh_recruits` • `leaderboard` • `addtrial <user> [rec]` • `pass <user>` • `fail <user> [reason]` • `trials`\n\n"
             "**🔨 Moderation & Protection**\n"
-            "`purge <num>` • `kick <user>` • `ban <user>` • `unban <id>` • `mute <user> <min>` • `unmute <user>` • `nuke` • `lockdown` • `slowmode <sec>` • `setnick <user> <nick>` • `addfilter <word>` • `filter add/remove/list` • `poll <question> | <opt1> | <opt2> ...` • `testwelcome [user]`\n\n"
+            "`purge <num>` • `kick <user>` • `ban <user>` • `unban <id>` • `mute <user> <min>` • `unmute <user>` • `lockdown` • `slowmode <sec>` • `setnick <user> <nick>` • `addfilter <word>` • `filter add/remove/list` • `poll <question> | <opt1> | <opt2> ...` • `testwelcome [user]`\n\n"
             "**⚙️ Utility, Tags & 67**\n"
             "`snipe` • `editsnipe` • `afk <reason>` • `tag <add/delete/list/get>` • `ping` • `whois <user>` • `lb67` • `serverinfo` • `avatar <user>`\n\n"
             "**💰 Economy & Casino**\n"
             "`daily` • `balance [user]` • `slots <bet>`\n\n"
-            "**🎲 Entertainment**\n"
-            "`ship <u1> [u2]` • `8ball <question>` • `coinflip` • `roll [sides]` • `reverse <text>`\n\n"
+            "**🎲 Entertainment (everyone can use)**\n"
+            "`ship <u1> [u2]` • `8ball <question>` • `coinflip` • `roll [sides]` • `reverse <text>`\n"
+            "`joke` • `fact` • `quote` • `compliment [user]` • `roast [user]` • `rps <rock/paper/scissors>`\n"
+            "`rate <thing>` • `choose a or b` • `wyr` • `truth` • `dare` • `mock <text>` • `uwu <text>`\n"
+            "`clap <text>` • `say <text>` • `howgay [user]` • `howhot [user]` • `iq [user]` • `pp [user]`\n"
+            "`randomnumber [min] [max]` • `password [length]`\n\n"
             "**✧ Welcome System**\n"
             "Automatic welcome on join (pings in `﹒💬︲chat`)\n"
             "`testwelcome [user]` - Test welcome message (Admin)"
