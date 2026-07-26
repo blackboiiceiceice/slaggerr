@@ -49,7 +49,8 @@ edited_sniped_messages = {}
 afk_users = {}
 SERVER_LOCKDOWN_STATUS = False
 SLOWMODE_ACTIVE = False
-active_polls = {}  # message_id: {"votes": {user_id: option_index}, "options": [], "question": str}
+active_polls = {}
+last_dictator_ping = 0  # cooldown tracker for "dictator"
 
 # ==========================================
 # 2. HIERARCHY & PERMISSION CHECK
@@ -210,8 +211,9 @@ async def on_message(message):
             reason = afk_users[mention.id]
             await message.channel.send(f"📌 **{mention.name}** is currently AFK: `{reason}`", delete_after=6)
 
-    # "67" Keyword Counter
     content_lower = message.content.lower()
+
+    # "67" Keyword Counter
     if re.search(r'\b67\b|\b6-7\b|\bsix\s+seven\b', content_lower):
         try:
             await message.add_reaction("😊")
@@ -232,6 +234,38 @@ async def on_message(message):
                 return
             except discord.Forbidden:
                 pass
+
+    # ========== UNIQUE KEYWORD TRIGGERS ==========
+
+    # "dictator" → pings wrierrr (15s cooldown)
+    global last_dictator_ping
+    if "dictator" in content_lower:
+        now = time.time()
+        if now - last_dictator_ping >= 15:
+            target = discord.utils.find(
+                lambda m: m.name.lower() == "wrierrr" or m.display_name.lower() == "wrierrr",
+                message.guild.members
+            )
+            if target:
+                await message.channel.send(f"📢 The dictator has been summoned → {target.mention}")
+                last_dictator_ping = now
+            else:
+                await message.channel.send("Dictator is offline... for now.", delete_after=4)
+        # silent cooldown if still on cooldown
+
+    # "bwa" → sends the legendary gif
+    if re.search(r'\bbwa\b', content_lower):
+        await message.channel.send("https://tenor.com/bghjJmsFBb0.gif")
+
+    # Extra niche triggers
+    if re.search(r'\bsus\b', content_lower):
+        await message.add_reaction("ඞ")
+
+    if "based" in content_lower:
+        await message.channel.send("based on what?", delete_after=6)
+
+    if "ratio" in content_lower:
+        await message.add_reaction("📉")
 
     await client.process_commands(message)
 
@@ -469,9 +503,6 @@ class PollView(discord.ui.View):
             await self.message.edit(embed=embed, view=self)
 
     async def end_poll(self, interaction: discord.Interaction):
-        if not interaction.user.guild_permissions.administrator and interaction.user != interaction.message.interaction.user if hasattr(interaction.message, 'interaction') else True:
-            # Allow creator or admins
-            pass  # simplified: anyone can end for now, or restrict
         self.stop()
         counts = defaultdict(int)
         for vote in self.votes.values():
@@ -1002,7 +1033,7 @@ class FunAndGames(commands.Cog):
     async def reverse(self, ctx, *, text: str):
         await ctx.send(text[::-1])
 
-    # ========== 20 NEW FUN FEATURES (everyone can use) ==========
+    # ========== 20+ FUN FEATURES (everyone can use) ==========
 
     @commands.command()
     async def joke(self, ctx):
@@ -1236,6 +1267,32 @@ class FunAndGames(commands.Cog):
         pwd = "".join(random.choice(chars) for _ in range(length))
         await ctx.send(f"🔐 Here's a random password: `{pwd}`", delete_after=30)
 
+    # Extra unique niche commands
+    @commands.command()
+    async def aura(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        score = random.randint(-50, 999)
+        if score > 500:
+            vibe = "god-tier aura"
+        elif score > 100:
+            vibe = "strong aura"
+        elif score > 0:
+            vibe = "mid aura"
+        else:
+            vibe = "negative aura (tragic)"
+        await ctx.send(f"✨ **{member.display_name}** has **{score}** aura — {vibe}")
+
+    @commands.command()
+    async def vibe(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        vibes = ["chaotic good", "lawful evil", "pure gremlin", "main character", "side character energy", "final boss", "npc", "sigma", "skibidi", "ohio"]
+        await ctx.send(f"🌀 **{member.display_name}**'s current vibe: **{random.choice(vibes)}**")
+
+    @commands.command()
+    async def cook(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        await ctx.send(f"👨‍🍳 **{member.display_name}** is cooking... 🔥\n*{random.choice(['absolute cinema', 'let him cook', 'he cooked too hard', 'burnt the kitchen', 'masterchef energy'])}*")
+
 
 class SystemHelp(commands.Cog):
     def __init__(self, bot): self.bot = bot
@@ -1258,7 +1315,13 @@ class SystemHelp(commands.Cog):
             "`joke` • `fact` • `quote` • `compliment [user]` • `roast [user]` • `rps <rock/paper/scissors>`\n"
             "`rate <thing>` • `choose a or b` • `wyr` • `truth` • `dare` • `mock <text>` • `uwu <text>`\n"
             "`clap <text>` • `say <text>` • `howgay [user]` • `howhot [user]` • `iq [user]` • `pp [user]`\n"
-            "`randomnumber [min] [max]` • `password [length]`\n\n"
+            "`randomnumber [min] [max]` • `password [length]` • `aura [user]` • `vibe [user]` • `cook [user]`\n\n"
+            "**⚡ Keyword Triggers (auto)**\n"
+            "`dictator` → pings @wrierrr (15s cooldown)\n"
+            "`bwa` → sends the legendary gif\n"
+            "`sus` → reacts with ඞ\n"
+            "`based` → replies \"based on what?\"\n"
+            "`ratio` → reacts 📉\n\n"
             "**✧ Welcome System**\n"
             "Automatic welcome on join (pings in `﹒💬︲chat`)\n"
             "`testwelcome [user]` - Test welcome message (Admin)"
