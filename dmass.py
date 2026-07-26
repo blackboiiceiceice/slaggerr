@@ -18,14 +18,11 @@ intents.guilds = True
 intents.members = True
 intents.invites = True
 
-# Prefixless setup
 client = commands.Bot(command_prefix="", case_insensitive=True, intents=intents)
 
-# Dark Theme Aesthetics
 EMBED_COLOR = 0x2b2d31
-ACCENT_COLOR = 0x5865F2  # Discord blurple for polls
+ACCENT_COLOR = 0x5865F2
 
-# File Paths for Persistence
 DATA_FILE = "recruiters.json"
 TRIALS_FILE = "active_trials.json"
 FILTER_FILE = "chat_filter.json"
@@ -35,15 +32,13 @@ ECONOMY_FILE = "economy.json"
 SLOWMODE_FILE = "slowmode_settings.json"
 AUTOROLES_FILE = "autoroles.json"
 
-# Role & Channel Names
-TARGET_ROLE_NAME = "︲ Recruiter"
+TARGET_ROLE_NAME = "[✦] Recruiter"
 STAFF_ROLE_NAME = "[•] Ticket Perms"
 ROLE_TRIAL_MEMBER = "[+] Trial Member"
 ROLE_TRIAL_AS = "[+] Trial AS"
 ROLE_TRIAL_EU = "[+] Trial EU"
 ROLE_OFFICIAL_MEMBER = "[+] Member"
 
-# In-Memory Cache & States
 invite_cache = {}
 sniped_messages = {}
 edited_sniped_messages = {}
@@ -214,7 +209,6 @@ async def on_message(message):
             except discord.Forbidden:
                 pass
 
-    # ========== KEYWORD TRIGGERS ==========
     global last_bwa
     if re.search(r'\bbwa\b', content_lower):
         now = time.time()
@@ -403,7 +397,7 @@ class RecruiterDecisionView(discord.ui.View):
 
 
 # ==========================================
-# INTERACTIVE POLL VIEW (Improved Discord-like)
+# IMPROVED POLL VIEW (Better GUI)
 # ==========================================
 class PollView(discord.ui.View):
     def __init__(self, question, options, creator_id, timeout=300):
@@ -411,20 +405,27 @@ class PollView(discord.ui.View):
         self.question = question
         self.options = options
         self.creator_id = creator_id
-        self.votes = {}  # user_id: option_index
+        self.votes = {}
         self.message = None
 
+        # Numbered buttons for voting
         for i, option in enumerate(options):
             button = discord.ui.Button(
-                label=f"{i+1}",
+                label=str(i + 1),
                 style=discord.ButtonStyle.primary,
                 custom_id=f"poll_opt_{i}",
-                row=0 if i < 3 else 1
+                row=0
             )
             button.callback = self.make_callback(i)
             self.add_item(button)
 
-        end_button = discord.ui.Button(label="End Poll", style=discord.ButtonStyle.danger, custom_id="poll_end", row=2)
+        # End button on its own row
+        end_button = discord.ui.Button(
+            label="End Poll",
+            style=discord.ButtonStyle.danger,
+            custom_id="poll_end",
+            row=1
+        )
         end_button.callback = self.end_poll
         self.add_item(end_button)
 
@@ -433,62 +434,94 @@ class PollView(discord.ui.View):
             user_id = interaction.user.id
             previous = self.votes.get(user_id)
             self.votes[user_id] = index
+
             if previous is not None and previous != index:
-                await interaction.response.send_message(f"Changed vote → **{self.options[index]}**", ephemeral=True)
+                await interaction.response.send_message(
+                    f"Vote changed → **{self.options[index]}**", ephemeral=True
+                )
             else:
-                await interaction.response.send_message(f"Voted → **{self.options[index]}**", ephemeral=True)
+                await interaction.response.send_message(
+                    f"Voted for **{self.options[index]}**", ephemeral=True
+                )
             await self.update_embed()
         return callback
 
-    def build_embed(self, final=False):
+    def build_bar(self, percentage: float, length: int = 12) -> str:
+        """Clean modern progress bar"""
+        filled = int(round(percentage / 100 * length))
+        empty = length - filled
+        return "█" * filled + "░" * empty
+
+    def build_embed(self, final: bool = False) -> discord.Embed:
         counts = defaultdict(int)
-        for v in self.votes.values():
-            counts[v] += 1
+        for vote in self.votes.values():
+            counts[vote] += 1
         total = len(self.votes)
+
+        # Find the winning option(s)
+        max_votes = max(counts.values()) if counts else 0
 
         title = "📊 Poll Results" if final else "📊 Poll"
         color = 0x57F287 if final else ACCENT_COLOR
 
-        desc = f"### {self.question}\n\n"
-        for i, opt in enumerate(self.options):
+        embed = discord.Embed(title=title, color=color)
+        embed.description = f"### {self.question}\n"
+
+        for i, option in enumerate(self.options):
             votes = counts[i]
             perc = (votes / total * 100) if total > 0 else 0
-            # Clean progress bar
-            filled = int(perc / 10)
-            bar = "▰" * filled + "▱" * (10 - filled)
-            desc += f"**{i+1}.** {opt}\n`{bar}` **{votes}** ({perc:.0f}%)\n\n"
+            bar = self.build_bar(perc)
 
-        desc += f"{'─' * 20}\n**{total}** vote{'s' if total != 1 else ''}"
+            # Highlight winner on final results
+            prefix = "🏆 " if final and votes == max_votes and max_votes > 0 else f"**{i+1}.** "
 
-        embed = discord.Embed(title=title, description=desc, color=color)
+            value = f"{prefix}{option}\n`{bar}` **{votes}** vote{'s' if votes != 1 else ''} • **{perc:.0f}%**"
+            embed.add_field(name="\u200b", value=value, inline=False)
+
+        embed.add_field(
+            name="\u200b",
+            value=f"{'─' * 28}\n**{total}** total vote{'s' if total != 1 else ''}",
+            inline=False
+        )
+
         if not final:
-            embed.set_footer(text="Click the numbers to vote • Only creator/admins can end")
+            embed.set_footer(text="Click a number to vote • Only the creator or admins can end this poll")
         else:
-            embed.set_footer(text="Voting has ended")
+            embed.set_footer(text="This poll has ended")
+
         return embed
 
     async def update_embed(self):
         if self.message:
             try:
                 await self.message.edit(embed=self.build_embed(), view=self)
-            except:
+            except Exception:
                 pass
 
     async def end_poll(self, interaction: discord.Interaction):
-        # Only creator or admins can end
         is_admin = interaction.user.guild_permissions.administrator
         is_creator = interaction.user.id == self.creator_id
+
         if not (is_admin or is_creator):
-            return await interaction.response.send_message("Only the poll creator or an administrator can end this poll.", ephemeral=True)
+            return await interaction.response.send_message(
+                "Only the poll creator or an administrator can end this poll.",
+                ephemeral=True
+            )
 
         self.stop()
-        await interaction.response.edit_message(embed=self.build_embed(final=True), view=None)
+        await interaction.response.edit_message(
+            embed=self.build_embed(final=True),
+            view=None
+        )
 
     async def on_timeout(self):
         if self.message:
             try:
-                await self.message.edit(embed=self.build_embed(final=True), view=None)
-            except:
+                await self.message.edit(
+                    embed=self.build_embed(final=True),
+                    view=None
+                )
+            except Exception:
                 pass
 
 
@@ -713,16 +746,25 @@ class Moderation(commands.Cog):
     @commands.command()
     @has_bot_hierarchy()
     async def poll(self, ctx, *, args: str = None):
-        """Interactive Discord-style poll. Usage: poll Question | Option 1 | Option 2 | ..."""
+        """Create a clean interactive poll. Usage: poll Question | Option 1 | Option 2 | ..."""
         if not args:
-            return await ctx.send("**Usage:** `poll <question> | <option1> | <option2> [| ...]`\nMax 5 options.", delete_after=8)
-        parts = [p.strip() for p in args.split('|')]
+            return await ctx.send(
+                "**Usage:** `poll <question> | <option1> | <option2> [| ...]`\nMax 5 options.",
+                delete_after=8
+            )
+
+        parts = [p.strip() for p in args.split("|")]
         if len(parts) < 2:
-            return await ctx.send("Provide a question and at least one option.\nExample: `poll Best region? | AS | EU`", delete_after=8)
+            return await ctx.send(
+                "Provide a question and at least one option.\nExample: `poll Best region? | AS | EU`",
+                delete_after=8
+            )
+
         question = parts[0]
         options = parts[1:6]
+
         if len(parts) > 6:
-            await ctx.send("Limited to 5 options.", delete_after=4)
+            await ctx.send("Limited to 5 options for clean layout.", delete_after=4)
 
         view = PollView(question, options, creator_id=ctx.author.id, timeout=300)
         embed = view.build_embed()
