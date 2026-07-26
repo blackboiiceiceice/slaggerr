@@ -35,7 +35,7 @@ SLOWMODE_FILE = "slowmode_settings.json"
 AUTOROLES_FILE = "autoroles.json"
 
 # Role & Channel Names
-TARGET_ROLE_NAME = "[✦] Recruiter"
+TARGET_ROLE_NAME = "︲ Recruiter"
 STAFF_ROLE_NAME = "[•] Ticket Perms"
 ROLE_TRIAL_MEMBER = "[+] Trial Member"
 ROLE_TRIAL_AS = "[+] Trial AS"
