@@ -1,616 +1,426 @@
 import discord
 from discord.ext import commands, tasks
 import asyncio
+import colorsys
 import random
 import os
 import json
-import time
-import re
-import io
+import requests
+from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
 # ==========================================
-# 1. SETUP INTENTS & BOT CONFIGURATION
+# 1. SETUP INTENTS & BOT INITIALIZATION
 # ==========================================
 intents = discord.Intents.default()
-intents.message_content = True
-intents.guilds = True
-intents.members = True
-intents.invites = True
-intents.presences = True
-intents.moderation = True
+intents.message_content = True  # Required for reading chat context & prefix commands
+intents.guilds = True           # Access server structures and diagnostics
+intents.members = True          # Access member listings (Crucial for tracking & moderation)
+intents.invites = True          # Required for invite tracking array telemetry
 
-client = commands.Bot(command_prefix="", case_insensitive=True, intents=intents)
+# Prefix officially set to ';' per your request!
+client = commands.Bot(command_prefix=';', case_insensitive=True, intents=intents)
 
-EMBED_COLOR = 0x2b2d31
-
-# Persistent Storage Files
+# Global Cache & Storage Pointers
+invite_cache = {}
 DATA_FILE = "recruiters.json"
-TRIALS_FILE = "active_trials.json"
-FILTER_FILE = "chat_filter.json"
-DB_67_FILE = "leaderboard_67.json"
-TAGS_FILE = "tags.json"
-ECONOMY_FILE = "economy.json"
-AUTOROLES_FILE = "autoroles.json"
-LEVELS_FILE = "levels.json"
-ANTINUKE_FILE = "antinuke_config.json"
-WHITELIST_FILE = "whitelist.json"
 
-# Role & Channel Names
+# Configurations - Role & Channel Identifiers
 TARGET_ROLE_NAME = "[✦] Recruiter"
 STAFF_ROLE_NAME = "[•] Ticket Perms"
-ROLE_INITIATE = "[+] initiate"
+TARGET_CHANNEL_NAME = "﹒📈︲movements"
 ROLE_TRIAL_MEMBER = "[+] Trial Member"
 ROLE_TRIAL_AS = "[+] Trial AS"
 ROLE_TRIAL_EU = "[+] Trial EU"
-ROLE_OFFICIAL_MEMBER = "[+] Member"
+ROLE_UNVERIFIED = "unverified"  
 
-# In-Memory Caches & States
-invite_cache = {}
-sniped_messages = {}
-edited_sniped_messages = {}
-afk_users = {}
-dnd_users = set()
-active_chatters = {}
-pending_applications = {}
-xp_cooldowns = {}
-spam_tracker = {}
-SERVER_LOCKDOWN_STATUS = False
+ONYX_BLACK = "#0b0b0a"
 
-# Anti-Nuke Execution Trackers {executor_id: [timestamps]}
-an_channel_deletes = {}
-an_role_deletes = {}
-an_ban_kicks = {}
-an_bot_adds = {}
-
-# ==========================================
-# 2. HIERARCHY & PERMISSION CHECKS
-# ==========================================
-def has_bot_hierarchy():
-    async def predicate(ctx):
-        if not ctx.guild:
-            return True
-        author = ctx.author
-        bot_member = ctx.guild.me
-
-        if author.id == ctx.guild.owner_id or author.guild_permissions.administrator:
-            return True
-
-        if author.top_role >= bot_member.top_role or author.guild_permissions.value >= bot_member.guild_permissions.value:
-            return True
-
-        await ctx.send("❌ **Permission Denied:** Your role hierarchy must match or exceed the bot's.", delete_after=5)
-        return False
-    return commands.check(predicate)
-
-# ==========================================
-# 3. JSON STORAGE HELPERS
-# ==========================================
-def load_json(file, default):
-    if os.path.exists(file):
+# --- CORE DATA OPERATIONS ---
+def load_recruiter_data():
+    if os.path.exists(DATA_FILE):
         try:
-            with open(file, "r") as f:
-                return json.load(f)
+            with open(DATA_FILE, "r") as f:
+                data = json.load(f)
         except Exception:
-            return default
-    return default
+            data = {}
+    else:
+        data = {}
 
-def save_json(file, data):
-    with open(file, "w") as f:
+    # Hardcoded seeding data protected securely within system runtime memory
+    presets = {
+        "yelpmaij_id_placeholder": {"username": "yelpmaij", "points": 4},
+        "smite_01_id_placeholder": {"username": "smite_01", "points": 2},
+        "hunterdme_id_placeholder": {"username": "hunterdme", "points": 1}
+    }
+    
+    for mock_id, profile in presets.items():
+        if not any(info.get("username") == profile["username"] for info in data.values()):
+            data[mock_id] = {
+                "username": profile["username"],
+                "guild_id": 0,
+                "applied_at": datetime.utcnow().isoformat(),
+                "expires_at": (datetime.utcnow() + timedelta(days=9999)).isoformat(),
+                "invite_count": profile["points"],
+                "invited_users": [],
+                "points": profile["points"]
+            }
+    return data
+
+def save_recruiter_data(data):
+    with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-def load_recruiter_data(): return load_json(DATA_FILE, {})
-def save_recruiter_data(data): save_json(DATA_FILE, data)
-
-def load_trials_data(): return load_json(TRIALS_FILE, {})
-def save_trials_data(data): save_json(TRIALS_FILE, data)
-
-def load_filter_words(): return load_json(FILTER_FILE, ["cheatclient", "exploitpacket"])
-def save_filter_words(words): save_json(FILTER_FILE, words)
-
-def load_67_data(): return load_json(DB_67_FILE, {})
-def save_67_data(data): save_json(DB_67_FILE, data)
-
-def load_tags(): return load_json(TAGS_FILE, {})
-def save_tags(data): save_json(TAGS_FILE, data)
-
-def load_economy(): return load_json(ECONOMY_FILE, {})
-def save_economy(data): save_json(ECONOMY_FILE, data)
-
-def load_autoroles(): return load_json(AUTOROLES_FILE, [ROLE_INITIATE])
-def save_autoroles(data): save_json(AUTOROLES_FILE, data)
-
-def load_levels(): return load_json(LEVELS_FILE, {})
-def save_levels(data): save_json(LEVELS_FILE, data)
-
-def load_antinuke_config():
-    default = {"enabled": True, "threshold": 3, "time_window": 10, "action": "ban"}
-    return load_json(ANTINUKE_FILE, default)
-
-def save_antinuke_config(data): save_json(ANTINUKE_FILE, data)
-
-def load_whitelist(): return load_json(WHITELIST_FILE, [])
-def save_whitelist(data): save_json(WHITELIST_FILE, data)
 
 # ==========================================
-# 4. ANTI-NUKE HELPER ENGINE
+# 2. NAMEMC SCRAPER UTILITY UTILS
 # ==========================================
-async def punish_executor(guild: discord.Guild, executor: discord.Member, reason: str):
-    whitelist = load_whitelist()
-    if executor.id == guild.owner_id or executor.id in whitelist or executor.id == client.user.id:
-        return
-
-    config = load_antinuke_config()
-    action = config.get("action", "ban")
+def fetch_namemc_telemetry(username):
+    """Utility function to grab Mojang profile UUID data and scrape historical records from NameMC."""
+    try:
+        mojang_url = f"https://api.mojang.com/users/profiles/minecraft/{username}"
+        response = requests.get(mojang_url, timeout=5)
+        if response.status_code != 200:
+            return None
+        data = response.json()
+        uuid = data['id']
+        corrected_name = data['name']
+    except Exception:
+        return None
 
     try:
-        # Strip all roles with dangerous permissions first
-        roles_to_remove = [r for r in executor.roles if r.name != "@everyone" and r < guild.me.top_role]
-        if roles_to_remove:
-            await executor.remove_roles(*roles_to_remove, reason=f"[ANTI-NUKE] {reason}")
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        namemc_url = f"https://namemc.com/profile/{uuid}"
+        web_response = requests.get(namemc_url, headers=headers, timeout=5)
+        
+        history = []
+        if web_response.status_code == 200:
+            soup = BeautifulSoup(web_response.text, 'html.parser')
+            names_elements = soup.find_all("a", class_="text-monospace")
+            for element in names_elements:
+                clean_name = element.get_text(strip=True)
+                if clean_name and clean_name not in history:
+                    history.append(clean_name)
+        
+        if not history:
+            history.append(corrected_name)
 
-        if action == "ban":
-            await guild.ban(executor, reason=f"[ANTI-NUKE SHIELD] {reason}")
-        elif action == "kick":
-            await executor.kick(reason=f"[ANTI-NUKE SHIELD] {reason}")
+        return {
+            "name": corrected_name,
+            "uuid": uuid,
+            "history": history,
+            "url": namemc_url
+        }
+    except Exception:
+        return {"name": corrected_name, "uuid": uuid, "history": [corrected_name], "url": f"https://namemc.com/profile/{username}"}
 
-        # Alert guild owner
-        if guild.owner:
-            embed = discord.Embed(
-                title="🚨 ANTI-NUKE SHIELD TRIGGERED",
-                description=f"**Rogue Admin Neutralized:** {executor.mention} (`{executor.id}`)\n**Reason:** `{reason}`\n**Action Taken:** `{action.upper()}`",
-                color=0xFF0000,
-                timestamp=datetime.utcnow()
-            )
-            try:
-                await guild.owner.send(embed=embed)
-            except discord.Forbidden:
-                pass
-    except discord.Forbidden:
-        pass
-
-def register_nuke_action(tracker_dict, executor_id: int, threshold: int, window: int) -> bool:
-    now = time.time()
-    if executor_id not in tracker_dict:
-        tracker_dict[executor_id] = []
-    
-    # Prune old timestamps
-    tracker_dict[executor_id] = [t for t in tracker_dict[executor_id] if now - t <= window]
-    tracker_dict[executor_id].append(now)
-
-    return len(tracker_dict[executor_id]) >= threshold
 
 # ==========================================
-# 5. LIFECYCLE HOOKS & EVENT LISTENERS
+# 3. BOT LIFECYCLE INTERFACES
 # ==========================================
 @client.event
 async def on_ready():
-    print(f"--> Logged in as {client.user.name} ({client.user.id})")
+    total_members = sum(guild.member_count for guild in client.guilds)
+    print(f'🤖 Logged in as {client.user.name} (ID: {client.user.id})')
+    print(f"⚙️ System Prefix configured securely to: ';'")
+    print(f'🌍 Connected to {len(client.guilds)} servers | Serving ~{total_members} users')
+    print('-----------------------------------------')
     
+    # Register all persistent components, interaction handlers, and dropdown views
     client.add_view(RecruiterLaunchView())
-    client.add_view(RecruitLaunchView())
     client.add_view(TicketActionView())
-    client.add_view(GeneralTicketLaunchView())
+    client.add_view(RecruitLaunchView())
     
+    # Initialize the invite tracking arrays
     for guild in client.guilds:
         try:
             invs = await guild.invites()
-            invite_cache[guild.id] = {inv.code: inv.uses for inv in invs}
+            invite_cache[guild.id] = {invite.code: invite.uses for invite in invs}
         except discord.Forbidden:
-            pass
-
-    rotate_status.start()
-    check_trial_expirations.start()
-    if not ping_active_user.is_running():
-        ping_active_user.start()
+            print(f"Missing permissions to track invites in server: {guild.name}")
+            
+    check_recruiter_quotas.start()
+    print('System monitoring loops fully operational.')
+    print('-----------------------------------------')
 
 @client.event
 async def on_member_join(member):
     guild = member.guild
-    config = load_antinuke_config()
+    data = load_recruiter_data()
+    try:
+        old_invites = invite_cache.get(guild.id, {})
+        new_invites = await guild.invites()
+        invite_cache[guild.id] = {invite.code: invite.uses for invite in new_invites}
+        
+        for invite in new_invites:
+            if invite.code in old_invites and invite.uses > old_invites[invite.code]:
+                inviter = invite.inviter
+                if inviter and str(inviter.id) in data:
+                    if member.id not in data[str(inviter.id)]["invited_users"]:
+                        data[str(inviter.id)]["invited_users"].append(member.id)
+                        data[str(inviter.id)]["invite_count"] += 1
+                        save_recruiter_data(data)
+                break
+    except Exception as e:
+        print(f"Error executing invite tracking metrics: {e}")
 
-    # Anti-Bot Add Detection
-    if member.bot and config.get("enabled", True):
-        async for entry in guild.audit_logs(action=discord.AuditLogAction.bot_add, limit=1):
-            executor = entry.user
-            if executor and executor.id != guild.owner_id and executor.id not in load_whitelist():
-                await punish_executor(guild, executor, "Unauthorized bot addition")
-                try:
-                    await member.ban(reason="[ANTI-NUKE] Unauthorized bot joined")
-                except discord.Forbidden:
-                    pass
-                return
 
-    # Auto-Role Assignment
-    autoroles_list = load_autoroles()
-    for role_name in autoroles_list:
-        role = discord.utils.get(guild.roles, name=role_name)
-        if not role:
-            try:
-                role = await guild.create_role(name=role_name, reason="Auto-created required role")
-            except discord.Forbidden:
-                pass
-
-        if role:
-            try:
-                await member.add_roles(role)
-            except discord.Forbidden:
-                pass
-
-@client.event
-async def on_guild_channel_delete(channel):
-    config = load_antinuke_config()
-    if not config.get("enabled", True):
-        return
-
-    guild = channel.guild
-    async for entry in guild.audit_logs(action=discord.AuditLogAction.channel_delete, limit=1):
-        executor = entry.user
-        if executor and isinstance(executor, discord.Member):
-            triggered = register_nuke_action(an_channel_deletes, executor.id, config["threshold"], config["time_window"])
-            if triggered:
-                await punish_executor(guild, executor, f"Mass channel deletion limit reached ({config['threshold']}+ in {config['time_window']}s)")
-
-@client.event
-async def on_guild_role_delete(role):
-    config = load_antinuke_config()
-    if not config.get("enabled", True):
-        return
-
-    guild = role.guild
-    async for entry in guild.audit_logs(action=discord.AuditLogAction.role_delete, limit=1):
-        executor = entry.user
-        if executor and isinstance(executor, discord.Member):
-            triggered = register_nuke_action(an_role_deletes, executor.id, config["threshold"], config["time_window"])
-            if triggered:
-                await punish_executor(guild, executor, f"Mass role deletion limit reached ({config['threshold']}+ in {config['time_window']}s)")
-
-@client.event
-async def on_member_ban(guild, user):
-    config = load_antinuke_config()
-    if not config.get("enabled", True):
-        return
-
-    async for entry in guild.audit_logs(action=discord.AuditLogAction.ban, limit=1):
-        executor = entry.user
-        if executor and isinstance(executor, discord.Member):
-            triggered = register_nuke_action(an_ban_kicks, executor.id, config["threshold"], config["time_window"])
-            if triggered:
-                await punish_executor(guild, executor, f"Mass ban limit reached ({config['threshold']}+ in {config['time_window']}s)")
-
-@client.event
-async def on_message_delete(message):
-    if message.author.bot:
-        return
-    sniped_messages[message.channel.id] = {
-        "content": message.content,
-        "author": message.author,
-        "time": datetime.utcnow()
-    }
-
-@client.event
-async def on_message_edit(before, after):
-    if before.author.bot or before.content == after.content:
-        return
-    edited_sniped_messages[before.channel.id] = {
-        "before": before.content,
-        "after": after.content,
-        "author": before.author,
-        "time": datetime.utcnow()
-    }
-
+# ==========================================
+# 4. AI MIND & MENTION LISTENER (Event Engine)
+# ==========================================
 @client.event
 async def on_message(message):
-    if message.author.bot or not message.guild:
+    if message.author.bot:
         return
 
-    # Anti-Spam Check
-    author_id = message.author.id
-    now_time = time.time()
-    if author_id not in spam_tracker:
-        spam_tracker[author_id] = []
-    spam_tracker[author_id] = [t for t in spam_tracker[author_id] if now_time - t <= 3]
-    spam_tracker[author_id].append(now_time)
-
-    if len(spam_tracker[author_id]) >= 5 and not message.author.guild_permissions.administrator:
-        try:
-            await message.author.timeout(timedelta(minutes=5), reason="AutoMod: Excessive Spamming")
-            await message.channel.send(f"🔇 {message.author.mention} timed out for 5m due to rapid message spam.", delete_after=5)
-        except discord.Forbidden:
-            pass
-        return
-
-    # Mass Mention Check
-    if len(message.mentions) > 5 and not message.author.guild_permissions.administrator:
-        try:
-            await message.delete()
-            await message.author.timeout(timedelta(minutes=10), reason="AutoMod: Mass Ping")
-            await message.channel.send(f"⚠️ {message.author.mention} timed out for 10m (Mass Mention Limit).", delete_after=5)
-            return
-        except discord.Forbidden:
-            pass
-
-    # XP Gain Engine
-    uid = str(message.author.id)
-    if uid not in xp_cooldowns or now_time - xp_cooldowns[uid] > 60:
-        xp_cooldowns[uid] = now_time
-        levels = load_levels()
-        user_data = levels.get(uid, {"xp": 0, "level": 1})
-        user_data["xp"] += random.randint(15, 25)
+    if client.user.mentioned_in(message) and not message.mention_everyone:
+        content = message.content.lower()
+        author = message.author.mention
         
-        needed_xp = user_data["level"] * 100
-        if user_data["xp"] >= needed_xp:
-            user_data["level"] += 1
-            user_data["xp"] -= needed_xp
-            try:
-                await message.channel.send(f"🎉 {message.author.mention} leveled up to **Level {user_data['level']}**!", delete_after=5)
-            except discord.Forbidden:
-                pass
-
-        levels[uid] = user_data
-        save_levels(levels)
-
-    # Active Chatter Tracking
-    if isinstance(message.channel, discord.TextChannel):
-        active_chatters[message.author.id] = {
-            "channel_id": message.channel.id,
-            "timestamp": datetime.utcnow()
+        responses = {
+            "hello": [f"Hello {author}! What can I process for you today?", f"Hey there! Need some help, or just dropping by?"],
+            "hi": [f"Hi {author}! 👋", f"Yo! What's up?"],
+            "help": ["Looking for instructions? Type `;help` to view my command protocols!"],
         }
+        
+        default_replies = [
+            f"You called, {author}? My database is online. Use `;` before a command to guide me!",
+            f"Analyzing your text input... If you want to check your gaming stats, try out my `;apply` system!"
+        ]
+        
+        chosen_reply = None
+        for key, reply_list in responses.items():
+            if key in content:
+                chosen_reply = random.choice(reply_list)
+                break
+                
+        if not chosen_reply:
+            chosen_reply = random.choice(default_replies)
+            
+        async with message.channel.typing():
+            await asyncio.sleep(1.0) 
+            await message.reply(chosen_reply)
 
-    # Server Lockdown Guard
-    global SERVER_LOCKDOWN_STATUS
-    if SERVER_LOCKDOWN_STATUS and not message.author.guild_permissions.administrator:
-        try:
-            await message.delete()
-        except discord.Forbidden:
-            pass
-        return
-
-    # Anti-Invite Link
-    if ("discord.gg/" in message.content.lower() or "discord.com/invite/" in message.content.lower()) and not message.author.guild_permissions.administrator:
-        try:
-            await message.delete()
-            await message.channel.send(f"⚠️ {message.author.mention}, invite links are strictly prohibited.", delete_after=4)
-            return
-        except discord.Forbidden:
-            pass
-
-    # AFK Clear & Mention Handler
-    if message.author.id in afk_users:
-        del afk_users[message.author.id]
-        await message.channel.send(f"Welcome back {message.author.mention}, your AFK status was cleared.", delete_after=4)
-
-    for mention in message.mentions:
-        if mention.id in afk_users:
-            reason = afk_users[mention.id]
-            await message.channel.send(f"📌 **{mention.name}** is currently AFK: `{reason}`", delete_after=6)
-
-    # "67" Keyword Counter
-    content_lower = message.content.lower()
-    if re.search(r'\b67\b|\b6-7\b|\bsix\s+seven\b', content_lower):
-        try:
-            await message.add_reaction("😊")
-        except discord.Forbidden:
-            pass
-        db = load_67_data()
-        db[uid] = db.get(uid, 0) + 1
-        save_67_data(db)
-
-    # Chat Filter
-    banned_words = load_filter_words()
-    for word in banned_words:
-        if word in content_lower and not message.author.guild_permissions.manage_messages:
-            try:
-                await message.delete()
-                await message.channel.send(f"⚠️ {message.author.mention}, that phrase is restricted.", delete_after=4)
-                return
-            except discord.Forbidden:
-                pass
-
+    # CRITICAL COMMAND PROCESSOR FOR SYSTEM EXECUTION
     await client.process_commands(message)
 
+
 # ==========================================
-# 6. ADVANCED TICKETING & RECRUITMENT VIEWS
+# 5. MODULE: RECRUITER APPLICATIONS UTILITIES
 # ==========================================
-class GeneralTicketLaunchView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=None)
-
-    @discord.ui.button(label="Open Ticket 📩", style=discord.ButtonStyle.primary, custom_id="open_general_ticket_btn")
-    async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        guild, member = interaction.guild, interaction.user
-        channel_name = f"ticket-{member.name.lower()}"
-
-        if discord.utils.get(guild.text_channels, name=channel_name):
-            return await interaction.response.send_message("You already have an open support ticket.", ephemeral=True)
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            member: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        }
-
-        ticket_channel = await guild.create_text_channel(name=channel_name, overwrites=overwrites, topic=f"Support Ticket for {member.id}")
-        embed = discord.Embed(title="Support Ticket", description=f"Hello {member.mention}, describe your issue. Support staff will respond shortly.", color=EMBED_COLOR)
-        await ticket_channel.send(content=f"{member.mention}", embed=embed, view=CloseTicketView())
-        await interaction.response.send_message(f"Ticket created: {ticket_channel.mention}", ephemeral=True)
-
-
-class CloseTicketView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=None)
-
-    @discord.ui.button(label="Close Ticket 🔒", style=discord.ButtonStyle.danger, custom_id="close_ticket_btn")
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        channel = interaction.channel
-        await interaction.response.send_message("Generating transcript and closing ticket in 5 seconds...")
-
-        messages = [f"--- Transcript for {channel.name} ---"]
-        async for msg in channel.history(limit=500, oldest_first=True):
-            messages.append(f"[{msg.created_at.strftime('%Y-%m-%d %H:%M:%S')}] {msg.author.name}: {msg.content}")
-
-        transcript_text = "\n".join(messages)
-        file_data = io.BytesIO(transcript_text.encode("utf-8"))
-
-        try:
-            user_id = int(channel.topic.replace("Support Ticket for ", ""))
-            member = channel.guild.get_member(user_id)
-            if member:
-                await member.send("Here is the transcript for your closed ticket:", file=discord.File(file_data, filename=f"{channel.name}-transcript.txt"))
-        except Exception:
-            pass
-
-        await asyncio.sleep(5)
-        await channel.delete()
-
-
-class DynamicRoleButton(discord.ui.Button):
-    def __init__(self, role_name: str):
-        super().__init__(label=role_name, style=discord.ButtonStyle.primary, custom_id=f"role_btn_{role_name}")
-        self.role_name = role_name
-
-    async def callback(self, interaction: discord.Interaction):
-        role = discord.utils.get(interaction.guild.roles, name=self.role_name)
-        if not role:
-            return await interaction.response.send_message(f"Role `{self.role_name}` does not exist.", ephemeral=True)
-
-        if role in interaction.user.roles:
-            await interaction.user.remove_roles(role)
-            await interaction.response.send_message(f"Removed role **{self.role_name}**.", ephemeral=True)
-        else:
-            await interaction.user.add_roles(role)
-            await interaction.response.send_message(f"Added role **{self.role_name}**!", ephemeral=True)
-
-
-class DynamicRoleView(discord.ui.View):
-    def __init__(self, roles):
-        super().__init__(timeout=None)
-        for r in roles:
-            self.add_item(DynamicRoleButton(r))
-
-
 class RecruiterLaunchView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=None)
+    def __init__(self):
+        super().__init__(timeout=None)
 
     @discord.ui.button(label="Apply for Recruiter 💼", style=discord.ButtonStyle.secondary, custom_id="apply_recruiter_btn")
     async def apply_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        guild, member = interaction.guild, interaction.user
+        guild = interaction.guild
+        member = interaction.user
+        
         role = discord.utils.get(guild.roles, name=TARGET_ROLE_NAME)
         staff_role = discord.utils.get(guild.roles, name=STAFF_ROLE_NAME)
         
         if role in member.roles:
-            return await interaction.response.send_message("You already have the Recruiter role.", ephemeral=True)
+            await interaction.response.send_message("❌ You already have the Recruiter role!", ephemeral=True)
+            return
 
-        ticket_channel_name = f"recruiter-{member.name.lower()}"
-        if discord.utils.get(guild.text_channels, name=ticket_channel_name):
-            return await interaction.response.send_message("You already have an open ticket.", ephemeral=True)
+        existing_channel = discord.utils.get(guild.text_channels, name=f"recruiter-ticket-{member.name.lower()}")
+        if existing_channel:
+            await interaction.response.send_message(f"❌ You already have an open application ticket: {existing_channel.mention}", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            member: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            member: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
         }
+        
         if staff_role:
-            overwrites[staff_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+            overwrites[staff_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True)
 
-        ticket_channel = await guild.create_text_channel(name=ticket_channel_name, overwrites=overwrites, topic=f"Application for {member.id}")
-        embed = discord.Embed(title="Recruiter Application Ticket", description=f"Welcome {member.mention}. Staff will review your submission shortly.", color=EMBED_COLOR)
-        await ticket_channel.send(content=f"{member.mention}", embed=embed, view=TicketActionView())
-        await interaction.response.send_message(f"Ticket opened: {ticket_channel.mention}", ephemeral=True)
+        ticket_channel = await guild.create_text_channel(
+            name=f"recruiter-ticket-{member.name}",
+            overwrites=overwrites,
+            topic=f"Recruiter Application for {member.id}"
+        )
+
+        msg_desc = (
+            f"Welcome {member.mention}.\n\n"
+            "Your application file has been initialized. Our leadership core will review your account metrics shortly.\n\n"
+            "**⚠️ STAFF REVIEW SECTION:**\n"
+            "Use the control array interface below to finalize this request."
+        )
+
+        embed = discord.Embed(
+            title="✦ RECRUITER FILE OPENED ✦",
+            description=msg_desc,
+            color=discord.Color.from_str(ONYX_BLACK)
+        )
+        embed.set_footer(text="Awaiting Authorization...")
+        
+        ping_mention = f"{member.mention}"
+        if staff_role:
+            ping_mention += f" | {staff_role.mention}"
+            
+        await ticket_channel.send(content=ping_mention, embed=embed, view=TicketActionView())
+        await interaction.followup.send(f"✅ Ticket created! Head over to {ticket_channel.mention} to proceed.", ephemeral=True)
 
 
 class TicketActionView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=None)
+    def __init__(self):
+        super().__init__(timeout=None)
 
-    @discord.ui.button(label="Accept", style=discord.ButtonStyle.success, custom_id="ticket_accept_btn")
-    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Accept Applicant ✅", style=discord.ButtonStyle.success, custom_id="ticket_accept_btn")
+    async def accept_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message("Only administrators can accept applications.", ephemeral=True)
-        
-        guild, channel = interaction.guild, interaction.channel
-        try:
-            user_id = int(channel.topic.replace("Application for ", ""))
-            member = guild.get_member(user_id)
-        except Exception:
-            return await channel.send("Could not identify applicant.")
+            await interaction.response.send_message("❌ Only Administrators can process applications.", ephemeral=True)
+            return
 
-        if member:
-            role = discord.utils.get(guild.roles, name=TARGET_ROLE_NAME)
-            if role:
-                await member.add_roles(role)
-            
+        await interaction.response.defer()
+        guild = interaction.guild
+        channel = interaction.channel
+        
+        try:
+            target_user_id = int(channel.topic.replace("Recruiter Application for ", ""))
+            member = guild.get_member(target_user_id)
+        except Exception:
+            await interaction.followup.send("❌ Error: Could not determine the applicant.")
+            return
+
+        if not member:
+            await interaction.followup.send("❌ Error: The applicant has left the server.")
+            return
+
+        role = discord.utils.get(guild.roles, name=TARGET_ROLE_NAME)
+        notif_channel = discord.utils.get(guild.text_channels, name=TARGET_CHANNEL_NAME)
+
+        if role:
+            await member.add_roles(role)
             data = load_recruiter_data()
+            expiry_time = (datetime.utcnow() + timedelta(days=7)).isoformat()
             data[str(member.id)] = {
-                "username": member.name, 
+                "username": member.name,
                 "guild_id": guild.id,
-                "expires_at": (datetime.utcnow() + timedelta(days=7)).isoformat(),
-                "points": 0,
-                "passed": 0,
-                "failed": 0,
-                "invited_users": []
+                "applied_at": datetime.utcnow().isoformat(),
+                "expires_at": expiry_time,
+                "invite_count": 0,
+                "invited_users": [],
+                "points": 0
             }
             save_recruiter_data(data)
-            await channel.send("Application approved. Closing ticket in 5 seconds...")
+
+            if notif_channel:
+                await notif_channel.send(f"{member.mention} ------> recruiter")
+            
+            await channel.send("🎉 **Application Approved!** Closing in 5 seconds...")
             await asyncio.sleep(5)
             await channel.delete()
 
-    @discord.ui.button(label="Deny", style=discord.ButtonStyle.danger, custom_id="ticket_deny_btn")
-    async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Deny Applicant ❌", style=discord.ButtonStyle.danger, custom_id="ticket_deny_btn")
+    async def deny_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message("Only administrators can deny applications.", ephemeral=True)
-        await interaction.response.send_message("Application denied. Closing ticket in 5 seconds...")
+            await interaction.response.send_message("❌ Only Administrators can process applications.", ephemeral=True)
+            return
+
+        channel = interaction.channel
+        await interaction.response.send_message("⚠️ **Application Denied.** Deleting in 5 seconds...")
         await asyncio.sleep(5)
-        await interaction.channel.delete()
+        await channel.delete()
 
 
+# ==========================================
+# 6. MODULE: NEW RECRUIT INTAKE FLOW (WITH AUTO-POINTS & SCRAPING)
+# ==========================================
 class RecruitLaunchView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=None)
+    def __init__(self):
+        super().__init__(timeout=None)
 
-    @discord.ui.button(label="Join Team ⚔️", style=discord.ButtonStyle.secondary, custom_id="join_team_btn")
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Join the Team ⚔️", style=discord.ButtonStyle.secondary, custom_id="join_heaven_team_btn")
+    async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(RecruitApplicationModal())
 
 
-class RecruitApplicationModal(discord.ui.Modal, title="Team Trial Application"):
-    ign = discord.ui.TextInput(label="Minecraft IGN", placeholder="e.g. Ice", required=True)
-    tier = discord.ui.TextInput(label="Tier", placeholder="e.g. Tier 3", default="Unrated", required=False)
-    region = discord.ui.TextInput(label="Region (AS or EU)", placeholder="AS or EU", min_length=2, max_length=2, required=True)
+class RecruitApplicationModal(discord.ui.Modal, title="Heaven Team Recruitment"):
+    ign = discord.ui.TextInput(label="IGN (Minecraft Username)", placeholder="e.g., iloveeatingbuildings", required=True)
+    tier = discord.ui.TextInput(label="Tier (If tested)", placeholder="e.g., Tier 3 / Unrated", default="Unrated", required=False)
+    availability = discord.ui.TextInput(label="Availability (When do you usually play?)", placeholder="e.g., 3-4 hours daily", required=True)
+    clans = discord.ui.TextInput(label="Previous Clans", placeholder="e.g., None / Tr*ce", required=False)
+    region = discord.ui.TextInput(label="Region (AS or EU)", placeholder="Must enter exactly: AS or EU", min_length=2, max_length=2, required=True)
 
     async def on_submit(self, interaction: discord.Interaction):
         user_region = self.region.value.strip().upper()
         if user_region not in ["AS", "EU"]:
-            return await interaction.response.send_message("Region must be either `AS` or `EU`.", ephemeral=True)
+            await interaction.response.send_message("❌ Invalid Region setup. Type exactly AS or EU.", ephemeral=True)
+            return
 
-        answers = {"ign": self.ign.value, "tier": self.tier.value, "region": user_region}
-        await interaction.response.send_message("Select the recruiter who invited you:", view=RecruiterDropdownView(interaction.user.id, answers), ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        
+        player_data = fetch_namemc_telemetry(self.ign.value)
+        
+        answers = {
+            "ign": self.ign.value, 
+            "tier": self.tier.value, 
+            "availability": self.availability.value, 
+            "clans": self.clans.value, 
+            "region": user_region,
+            "namemc": player_data
+        }
+        
+        view = RecruiterDropdownView(applicant_id=interaction.user.id, answers=answers)
+        await interaction.followup.send("💡 **Final Step:** Select the recruiter who invited you:", view=view, ephemeral=True)
 
 
 class RecruiterDropdownView(discord.ui.View):
     def __init__(self, applicant_id, answers):
-        super().__init__(timeout=300)
+        super().__init__(timeout=600)
         self.add_item(RecruiterUserSelect(applicant_id, answers))
 
 
 class RecruiterUserSelect(discord.ui.UserSelect):
     def __init__(self, applicant_id, answers):
-        self.applicant_id, self.answers = applicant_id, answers
-        super().__init__(placeholder="Select recruiter...", min_values=1, max_values=1)
+        self.applicant_id = applicant_id
+        self.answers = answers
+        super().__init__(placeholder="Select the recruiter...", min_values=1, max_values=1)
 
     async def callback(self, interaction: discord.Interaction):
-        recruiter = self.values[0]
+        await interaction.response.defer(ephemeral=True)
+        recruiter = self.values[0] 
         target_role = discord.utils.get(interaction.guild.roles, name=TARGET_ROLE_NAME)
         
         if not target_role or target_role not in recruiter.roles:
-            return await interaction.response.send_message(f"{recruiter.mention} is not an authorized recruiter.", ephemeral=True)
+            await interaction.followup.send(f"❌ Selection Error: {recruiter.mention} is not an authorized recruiter.", ephemeral=True)
+            return
 
-        embed = discord.Embed(
-            title="New Recruit Submission",
-            description=f"**IGN:** {self.answers['ign']}\n**Tier:** {self.answers['tier']}\n**Region:** {self.answers['region']}\n**Recruiter:** {recruiter.mention}",
-            color=EMBED_COLOR
+        welcome_format = (
+            f"## 🪽 New Recruit Application!\n"
+            f"> - **IGN: {self.answers['ign']}**\n"
+            f"> - **Tier: {self.answers['tier']}**\n"
+            f"> - **Availability: {self.answers['availability']}**\n"
+            f"> - **Who Invited You: {recruiter.mention}**\n"
+            f"> - **Previous Clans: {self.answers['clans']}**\n"
+            f"> - **Region: {self.answers['region']}**"
         )
+        
+        embed = discord.Embed(title="⚡ RECRUIT APPROVAL REQUEST", description=welcome_format, color=discord.Color.from_str(ONYX_BLACK))
+        
+        p_data = self.answers.get("namemc")
+        if p_data:
+            history_str = "\n".join([f"• {n}" for n in p_data["history"]])
+            if len(history_str) > 1024:
+                history_str = history_str[:1000] + "\n...and more names"
+            embed.add_field(name="📜 Scraped NameMC History", value=history_str, inline=False)
+            embed.set_thumbnail(url=f"https://minotar.net/armor/body/{p_data['uuid']}/100.png")
+            embed.set_footer(text=f"UUID: {p_data['uuid']}")
+        else:
+            embed.add_field(name="⚠️ NameMC Verification Failed", value="Could not verify skin or name history arrays via Mojang servers.", inline=False)
+        
         try:
             await recruiter.send(embed=embed, view=RecruiterDecisionView(self.applicant_id, interaction.guild.id, self.answers))
-            await interaction.response.send_message("Sent application to recruiter DMs.", ephemeral=True)
+            await interaction.followup.send("✅ Intake profile file securely dispatched to your recruiter's DMs.", ephemeral=True)
         except discord.Forbidden:
-            await interaction.response.send_message("Recruiter has DMs disabled.", ephemeral=True)
+            await interaction.followup.send("❌ Transmission Error: That recruiter has their DMs closed.", ephemeral=True)
 
 
 class RecruiterDecisionView(discord.ui.View):
@@ -618,744 +428,299 @@ class RecruiterDecisionView(discord.ui.View):
         super().__init__(timeout=None)
         self.applicant_id, self.guild_id, self.answers = applicant_id, guild_id, answers
 
-    @discord.ui.button(label="Approve", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Approve Entry ✅", style=discord.ButtonStyle.success)
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = client.get_guild(self.guild_id)
         member = guild.get_member(self.applicant_id)
+        recruiter = interaction.user
+        
         if not member:
-            return await interaction.response.send_message("User left the server.", ephemeral=True)
+            await interaction.response.send_message("❌ Error: The user has left the server.", ephemeral=True)
+            return
 
         role = discord.utils.get(guild.roles, name=ROLE_TRIAL_MEMBER)
         region_role = discord.utils.get(guild.roles, name=ROLE_TRIAL_AS if self.answers["region"] == "AS" else ROLE_TRIAL_EU)
+        await member.add_roles(role, region_role)
         
-        if role: await member.add_roles(role)
-        if region_role: await member.add_roles(region_role)
+        unverified_role = discord.utils.get(guild.roles, name=ROLE_UNVERIFIED)
+        if unverified_role and unverified_role in member.roles:
+            try: await member.remove_roles(unverified_role)
+            except discord.Forbidden: pass
 
         try:
-            await member.edit(nick=f"{self.answers['ign']} | {self.answers['region']}")
-        except discord.Forbidden:
-            pass
+            new_nickname = f"{self.answers['ign']} | {self.answers['region']}"
+            await member.edit(nick=new_nickname[:32]) 
+        except discord.Forbidden: pass
 
-        trials = load_trials_data()
-        trials[str(member.id)] = {
-            "recruiter_id": interaction.user.id,
-            "start_time": datetime.utcnow().isoformat(),
-            "ign": self.answers["ign"],
-            "region": self.answers["region"]
-        }
-        save_trials_data(trials)
-
+        # AUTOMATIC SCORE MATRIX CREDIT TRACKING
         data = load_recruiter_data()
-        rec_id = str(interaction.user.id)
-        if rec_id not in data:
-            data[rec_id] = {"username": interaction.user.name, "points": 0, "passed": 0, "failed": 0, "invited_users": []}
+        recruiter_id_str = str(recruiter.id)
         
-        if member.id not in data[rec_id].get("invited_users", []):
-            data[rec_id].setdefault("invited_users", []).append(member.id)
-            data[rec_id]["points"] = data[rec_id].get("points", 0) + 1
+        if recruiter_id_str not in data:
+            data[recruiter_id_str] = {
+                "username": recruiter.name,
+                "guild_id": guild.id,
+                "applied_at": datetime.utcnow().isoformat(),
+                "expires_at": (datetime.utcnow() + timedelta(days=7)).isoformat(),
+                "invite_count": 0,
+                "invited_users": [],
+                "points": 0
+            }
+        
+        if "points" not in data[recruiter_id_str]:
+            data[recruiter_id_str]["points"] = 0
+            
+        if member.id not in data[recruiter_id_str]["invited_users"]:
+            data[recruiter_id_str]["invited_users"].append(member.id)
+            data[recruiter_id_str]["points"] += 1
             save_recruiter_data(data)
 
-        await interaction.response.send_message(f"Approved! Trial started and point added. Total: `{data[rec_id]['points']}`", ephemeral=True)
+        await interaction.response.send_message(f"✅ Approved! You have been awarded **+1 Point**. Total: {data[recruiter_id_str]['points']} pts.", ephemeral=True)
+        await interaction.message.edit(view=None)
+
+    @discord.ui.button(label="Deny Entry ❌", style=discord.ButtonStyle.danger)
+    async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("❌ Application files denied.", ephemeral=True)
         await interaction.message.edit(view=None)
 
 
 # ==========================================
-# 7. COGS & COMMAND ENGINE
+# 7. MODULE: THE INTEGRATED COMMANDS ENGINE
 # ==========================================
-class AntiNuke(commands.Cog):
-    def __init__(self, bot): self.bot = bot
+class MasterApplicationCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
 
     @commands.command()
-    async def antinuke(self, ctx, status: str = None):
-        if ctx.author.id != ctx.guild.owner_id and not ctx.author.guild_permissions.administrator:
-            return await ctx.send("❌ Only the Server Owner / Admins can configure Anti-Nuke.")
+    async def apply(self, ctx, minecraft_username: str = None):
+        if not minecraft_username:
+            return await ctx.send("❌ **Usage:** `;apply <Minecraft_Username>`")
         
-        config = load_antinuke_config()
-        if not status:
-            state = "ENABLED 🟢" if config.get("enabled", True) else "DISABLED 🔴"
-            embed = discord.Embed(title="🛡️ Anti-Nuke Shield Status", color=EMBED_COLOR)
-            embed.add_field(name="Status", value=state, inline=True)
-            embed.add_field(name="Threshold", value=f"`{config['threshold']}` actions", inline=True)
-            embed.add_field(name="Time Window", value=f"`{config['time_window']}` seconds", inline=True)
-            embed.add_field(name="Punishment Action", value=f"`{config['action'].upper()}`", inline=True)
-            return await ctx.send(embed=embed)
-
-        if status.lower() in ["on", "enable", "true"]:
-            config["enabled"] = True
-            save_antinuke_config(config)
-            await ctx.send("🟢 **Anti-Nuke Shield is now ENABLED.**")
-        elif status.lower() in ["off", "disable", "false"]:
-            config["enabled"] = False
-            save_antinuke_config(config)
-            await ctx.send("🔴 **Anti-Nuke Shield is now DISABLED.**")
-        else:
-            await ctx.send("Usage: `antinuke <on/off>`")
-
-    @commands.command()
-    async def whitelist(self, ctx, action: str = "list", member: discord.Member = None):
-        if ctx.author.id != ctx.guild.owner_id:
-            return await ctx.send("❌ Only the Server Owner can manage the Anti-Nuke Whitelist.")
-
-        wl = load_whitelist()
-        if action.lower() == "add" and member:
-            if member.id not in wl:
-                wl.append(member.id)
-                save_whitelist(wl)
-                await ctx.send(f"✅ Added {member.mention} to Anti-Nuke Whitelist.")
-            else:
-                await ctx.send("User is already whitelisted.")
-        elif action.lower() == "remove" and member:
-            if member.id in wl:
-                wl.remove(member.id)
-                save_whitelist(wl)
-                await ctx.send(f"❌ Removed {member.mention} from Anti-Nuke Whitelist.")
-            else:
-                await ctx.send("User not found in whitelist.")
-        else:
-            wl_mentions = [f"<@{uid}> (`{uid}`)" for uid in wl]
-            desc = "\n".join(wl_mentions) if wl_mentions else "No users currently whitelisted."
-            embed = discord.Embed(title="🛡️ Anti-Nuke Whitelist", description=desc, color=EMBED_COLOR)
-            await ctx.send(embed=embed)
-
-    @commands.command()
-    async def antinukesettings(self, ctx, threshold: int = 3, time_window: int = 10, action: str = "ban"):
-        if ctx.author.id != ctx.guild.owner_id:
-            return await ctx.send("❌ Only the Server Owner can modify thresholds.")
-
-        if action.lower() not in ["ban", "kick"]:
-            return await ctx.send("Action must be either `ban` or `kick`.")
-
-        config = load_antinuke_config()
-        config["threshold"] = threshold
-        config["time_window"] = time_window
-        config["action"] = action.lower()
-        save_antinuke_config(config)
-
-        await ctx.send(f"⚙️ Anti-Nuke updated: Trigger on `{threshold}` actions in `{time_window}s`. Action: `{action.upper()}`")
-
-    @commands.command()
-    async def panic(self, ctx):
-        if ctx.author.id != ctx.guild.owner_id:
-            return await ctx.send("❌ Emergency panic switch can only be triggered by the Server Owner.")
-
-        await ctx.send("🚨 **PANIC MODE ACTIVATED! LOCKING ALL CHANNELS AND STRIPPING DANGEROUS PERMISSIONS...**")
+        waiting_msg = await ctx.send(f"🔍 Fetching active NameMC telemetry matrix logs for `{minecraft_username}`...")
+        player_data = fetch_namemc_telemetry(minecraft_username)
+        await waiting_msg.delete()
         
-        # Lock channels
-        for channel in ctx.guild.text_channels:
-            try:
-                await channel.set_permissions(ctx.guild.default_role, send_messages=False)
-            except discord.Forbidden:
-                pass
-
-        global SERVER_LOCKDOWN_STATUS
-        SERVER_LOCKDOWN_STATUS = True
-        await ctx.send("🔒 Emergency lockdown executed. All text channels restricted.")
-
-
-class Management(commands.Cog):
-    def __init__(self, bot): self.bot = bot
-
-    @commands.command()
-    async def apply(self, ctx, *, ign: str = None):
-        if not ign:
-            return await ctx.send("Usage: `apply <Minecraft_IGN>`")
-        pending_applications[ctx.author.id] = {
-            "ign": ign,
-            "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        }
-        embed = discord.Embed(title="Application Logged", description=f"**User:** {ctx.author.mention}\n**IGN:** `{ign}`", color=EMBED_COLOR)
+        if not player_data:
+            return await ctx.send(f"❌ Account lookup failed for `{minecraft_username}`.")
+        
+        embed = discord.Embed(title="📥 New Recruit Application Filed", color=discord.Color.dark_green(), timestamp=datetime.utcnow())
+        embed.add_field(name="👤 Discord Applicant", value=f"{ctx.author.mention} (`{ctx.author.name}`)", inline=False)
+        embed.add_field(name="🎮 Profile IGN", value=f"[{player_data['name']}]({player_data['url']})", inline=True)
+        embed.add_field(name="🆔 Profile UUID", value=f"`{player_data['uuid']}`", inline=True)
+        
+        history_string = "\n".join([f"• {name}" for name in player_data["history"]])
+        if len(history_string) > 1024:
+            history_string = history_string[:1000] + "\n...and more aliases"
+            
+        embed.add_field(name="📜 NameMC History Track", value=history_string, inline=False)
+        embed.set_thumbnail(url=f"https://minotar.net/armor/body/{player_data['uuid']}/100.png")
         await ctx.send(embed=embed)
 
-    @commands.command()
-    @has_bot_hierarchy()
-    async def restrike(self, ctx):
-        embed = discord.Embed(title="Recruiter Portal", description="Click below to open a recruiter application ticket.", color=EMBED_COLOR)
+    @commands.command(name="restrike")
+    @commands.has_permissions(administrator=True)
+    async def restrike_panel(self, ctx):
+        panel_desc = (
+            "### ─── ❖ ───\n\n"
+            "Want to officially step up and join the **Heaven** management rotation?\n\n"
+            "**📋 THE MANDATE:**\n"
+            "> You must secure at least **2 active members** via your personal invite link within your first 7 days.\n\n"
+            "### ─── ❖ ───\n"
+            "Click the button below to initiate a private clearance ticket."
+        )
+        embed = discord.Embed(title="```✦ RECRUITER APPLICATIONS ✦\n```", description=panel_desc, color=discord.Color.from_str(ONYX_BLACK))
         await ctx.send(embed=embed, view=RecruiterLaunchView())
+        await ctx.message.delete()
 
-    @commands.command()
-    @has_bot_hierarchy()
-    async def refresh_recruits(self, ctx):
-        embed = discord.Embed(title="Team Trial Portal", description="Click below to submit your application to join the team.", color=EMBED_COLOR)
+    @commands.command(name="refresh_recruits")
+    @commands.has_permissions(administrator=True)
+    async def drop_recruits_panel(self, ctx):
+        embed = discord.Embed(title="```✦ HEAVEN TRIAL ENTRY FILE ✦```", description="Click the button to launch your registration file.", color=discord.Color.from_str(ONYX_BLACK))
         await ctx.send(embed=embed, view=RecruitLaunchView())
+        await ctx.message.delete()
 
-    @commands.command()
-    @has_bot_hierarchy()
-    async def ticketportal(self, ctx):
-        embed = discord.Embed(title="Support Portal", description="Click below to open a general support ticket.", color=EMBED_COLOR)
-        await ctx.send(embed=embed, view=GeneralTicketLaunchView())
-
-    @commands.command(aliases=["recruiters", "lb"])
-    @has_bot_hierarchy()
-    async def leaderboard(self, ctx):
+    @commands.command(name="leaderboard", aliases=["lb"])
+    async def leaderboard_cmd(self, ctx):
         data = load_recruiter_data()
+        
         if not data:
-            return await ctx.send("No recruiter statistics recorded yet.")
-        
-        sorted_recruiters = sorted(data.items(), key=lambda x: x[1].get("points", 0), reverse=True)
-        desc = ""
-        for i, (r_id, info) in enumerate(sorted_recruiters[:10], 1):
-            passed = info.get("passed", 0)
-            failed = info.get("failed", 0)
-            desc += f"`#{i}` <@{r_id}> — **{info.get('points', 0)}** recruits (`{passed}P` / `{failed}F`)\n"
-        
-        embed = discord.Embed(title="Recruitment Leaderboard", description=desc, color=EMBED_COLOR)
+            return await ctx.send("📋 The recruitment score database is currently empty.")
+
+        sorted_recruiters = sorted(
+            data.items(), 
+            key=lambda item: item[1].get("points", 0), 
+            reverse=True
+        )
+
+        lb_description = ""
+        medals = ["🥇", "🥈", "🥉"]
+
+        for index, (recruiter_id, info) in enumerate(sorted_recruiters[:10]):
+            points = info.get("points", 0)
+            username = info.get("username", f"User {recruiter_id}")
+            placement = medals[index] if index < 3 else f"`#{index + 1}`"
+            lb_description += f"{placement} **{username}** — `{points} Recruits`\n"
+
+        embed = discord.Embed(
+            title="⚔️ **HEAVEN RECRUITMENT LEADERBOARD** ⚔️",
+            description=lb_description if lb_description else "*No points scored this period.*",
+            color=discord.Color.from_str(ONYX_BLACK),
+            timestamp=datetime.utcnow()
+        )
+        embed.set_footer(text="Updates automatically upon recruit acceptance")
         await ctx.send(embed=embed)
 
-    @commands.command()
-    @has_bot_hierarchy()
-    async def addtrial(self, ctx, member: discord.Member, recruiter: discord.Member = None):
-        recruiter = recruiter or ctx.author
-        role = discord.utils.get(ctx.guild.roles, name=ROLE_TRIAL_MEMBER)
-        if role:
-            await member.add_roles(role)
-        
-        trials = load_trials_data()
-        trials[str(member.id)] = {
-            "recruiter_id": recruiter.id,
-            "start_time": datetime.utcnow().isoformat(),
-            "ign": member.display_name,
-            "region": "Unknown"
-        }
-        save_trials_data(trials)
-        await ctx.send(f"Added trial for {member.mention} under recruiter {recruiter.mention}.")
+    @commands.command(name="say")
+    @commands.has_permissions(administrator=True)
+    async def say_cmd(self, ctx, *, text: str):
+        await ctx.message.delete()
+        await ctx.send(text)
 
-    @commands.command(name="pass")
-    @has_bot_hierarchy()
-    async def pass_member(self, ctx, member: discord.Member):
-        trials = load_trials_data()
-        m_id = str(member.id)
-        
-        trial_role = discord.utils.get(ctx.guild.roles, name=ROLE_TRIAL_MEMBER)
-        official_role = discord.utils.get(ctx.guild.roles, name=ROLE_OFFICIAL_MEMBER)
-        
-        if trial_role and trial_role in member.roles:
-            await member.remove_roles(trial_role)
-        if official_role:
-            await member.add_roles(official_role)
 
-        if m_id in trials:
-            rec_id = str(trials[m_id]["recruiter_id"])
-            del trials[m_id]
-            save_trials_data(trials)
-
-            data = load_recruiter_data()
-            if rec_id in data:
-                data[rec_id]["passed"] = data[rec_id].get("passed", 0) + 1
-                save_recruiter_data(data)
-
-        await ctx.send(f"🎉 **{member.name}** passed their trial and is now an official member!")
+# ==========================================
+# 8. MODULE: ROLE-PLAY & UTILITY CORE (WITH GIF EMBEDS)
+# ==========================================
+class Roleplay(commands.Cog):
+    def __init__(self, bot): 
+        self.bot = bot
+    def get_rp_embed(self, title, description, color, gif_url): 
+        embed = discord.Embed(title=title, description=description, color=color)
+        embed.set_image(url=gif_url)
+        return embed
 
     @commands.command()
-    @has_bot_hierarchy()
-    async def fail(self, ctx, member: discord.Member, *, reason: str = "Trial period concluded."):
-        trials = load_trials_data()
-        m_id = str(member.id)
-        
-        trial_role = discord.utils.get(ctx.guild.roles, name=ROLE_TRIAL_MEMBER)
-        if trial_role and trial_role in member.roles:
-            await member.remove_roles(trial_role)
-
-        if m_id in trials:
-            rec_id = str(trials[m_id]["recruiter_id"])
-            del trials[m_id]
-            save_trials_data(trials)
-
-            data = load_recruiter_data()
-            if rec_id in data:
-                data[rec_id]["failed"] = data[rec_id].get("failed", 0) + 1
-                save_recruiter_data(data)
-
-        await ctx.send(f"❌ **{member.name}** failed their trial. Reason: `{reason}`")
+    async def hug(self, ctx, member: discord.Member):
+        if member == ctx.author: return await ctx.send("🤗 Self-hugs keep the server latency levels grounded!")
+        gif = "https://i.imgur.com/r9aBOid.gif"
+        await ctx.send(embed=self.get_rp_embed("✨ Pure Warmth!", f"**{ctx.author.name}** wrapped their arms tightly around **{member.name}** for a big hug! 🤗", discord.Color.from_rgb(255, 182, 193), gif))
 
     @commands.command()
-    @has_bot_hierarchy()
-    async def trials(self, ctx):
-        trials = load_trials_data()
-        if not trials:
-            return await ctx.send("No active trials.")
-
-        desc = ""
-        now = datetime.utcnow()
-        for m_id, info in trials.items():
-            start = datetime.fromisoformat(info["start_time"])
-            days_left = max(0, 7 - (now - start).days)
-            desc += f"• <@{m_id}> | Recruiter: <@{info['recruiter_id']}> | `{days_left}d remaining`\n"
-
-        embed = discord.Embed(title="Active Trials", description=desc, color=EMBED_COLOR)
-        await ctx.send(embed=embed)
+    async def slap(self, ctx, member: discord.Member):
+        if member == ctx.author: return await ctx.send("💥 Avoid self-sabotage workflows!")
+        gif = "https://i.imgur.com/97wXv8v.gif"
+        await ctx.send(embed=self.get_rp_embed("💥 OUCH!", f"**{ctx.author.name}** just winds up and **SLAPS** **{member.name}** clean across the face!", discord.Color.from_rgb(255, 69, 0), gif))
 
     @commands.command()
-    @has_bot_hierarchy()
-    async def reactionrole(self, ctx, *, role_names: str):
-        roles = [r.strip() for r in role_names.split(",")]
-        embed = discord.Embed(title="Role Selection Panel", description="Click any button below to toggle your roles:", color=EMBED_COLOR)
-        await ctx.send(embed=embed, view=DynamicRoleView(roles))
+    async def pat(self, ctx, member: discord.Member):
+        gif = "https://i.imgur.com/LUw0m9n.gif"
+        await ctx.send(embed=self.get_rp_embed("🐱 Gentle Pats", f"**{ctx.author.name}** gently pats **{member.name}** on the head.", discord.Color.light_grey(), gif))
 
     @commands.command()
-    @has_bot_hierarchy()
-    async def autorole(self, ctx, action: str = "list", role_name: str = None):
-        autoroles = load_autoroles()
-        if action.lower() == "add" and role_name:
-            if role_name not in autoroles:
-                autoroles.append(role_name)
-                save_autoroles(autoroles)
-                await ctx.send(f"Added **{role_name}** to join autoroles.")
-            else:
-                await ctx.send("Role already in autoroles.")
-        elif action.lower() == "remove" and role_name:
-            if role_name in autoroles:
-                autoroles.remove(role_name)
-                save_autoroles(autoroles)
-                await ctx.send(f"Removed **{role_name}** from join autoroles.")
-            else:
-                await ctx.send("Role not found in autoroles.")
-        else:
-            await ctx.send(f"**Current Auto-Roles on Join:** {', '.join(f'`{r}`' for r in autoroles)}")
+    async def punch(self, ctx, member: discord.Member):
+        if member == ctx.author: return await ctx.send("💥 Stand down!")
+        gif = "https://i.imgur.com/G9g9gT9.gif"
+        await ctx.send(embed=self.get_rp_embed("👊 Direct Hit!", f"**{ctx.author.name}** launches a solid punch right at **{member.name}**!", discord.Color.red(), gif))
 
 
-class LevelingAndXP(commands.Cog):
-    def __init__(self, bot): self.bot = bot
+class InfoUtilities(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
 
-    @commands.command()
-    async def rank(self, ctx, member: discord.Member = None):
+    @commands.command(name="userinfo")
+    async def userinfo_cmd(self, ctx, member: discord.Member = None):
         member = member or ctx.author
-        levels = load_levels()
-        data = levels.get(str(member.id), {"xp": 0, "level": 1})
-        needed = data["level"] * 100
-        
-        embed = discord.Embed(title=f"{member.name}'s Rank", color=EMBED_COLOR)
-        embed.add_field(name="Level", value=f"**{data['level']}**", inline=True)
-        embed.add_field(name="XP Progress", value=f"`{data['xp']} / {needed}`", inline=True)
+        roles = [role.mention for role in member.roles[1:]]
+        embed = discord.Embed(title=f"👤 User Telemetry: {member.name}", color=discord.Color.blue())
+        embed.add_field(name="ID", value=f"`{member.id}`", inline=True)
+        embed.add_field(name="Joined Discord", value=member.created_at.strftime("%Y-%m-%d"), inline=True)
+        embed.add_field(name="Joined Server", value=member.joined_at.strftime("%Y-%m-%d"), inline=True)
+        embed.add_field(name="Roles Details", value=" ".join(roles) if roles else "None", inline=False)
         await ctx.send(embed=embed)
 
-    @commands.command(aliases=["levels"])
-    async def xpleaderboard(self, ctx):
-        levels = load_levels()
-        if not levels:
-            return await ctx.send("No XP stats recorded yet.")
-        
-        sorted_users = sorted(levels.items(), key=lambda x: (x[1]["level"], x[1]["xp"]), reverse=True)
-        desc = ""
-        for i, (uid, data) in enumerate(sorted_users[:10], 1):
-            desc += f"`#{i}` <@{uid}> — **Level {data['level']}** (`{data['xp']}` XP)\n"
-        
-        embed = discord.Embed(title="Server Level Leaderboard", description=desc, color=EMBED_COLOR)
+    @commands.command(name="serverinfo")
+    async def serverinfo_cmd(self, ctx):
+        guild = ctx.guild
+        embed = discord.Embed(title=f"📊 Guild Metrics: {guild.name}", color=discord.Color.orange())
+        embed.add_field(name="Total Members", value=f"`{guild.member_count}`", inline=True)
+        embed.add_field(name="Text Channels", value=f"`{len(guild.text_channels)}`", inline=True)
+        embed.add_field(name="Voice Channels", value=f"`{len(guild.voice_channels)}`", inline=True)
+        embed.add_field(name="Roles Count", value=f"`{len(guild.roles)}`", inline=True)
         await ctx.send(embed=embed)
-
-    @commands.command()
-    @has_bot_hierarchy()
-    async def setxp(self, ctx, member: discord.Member, xp: int):
-        levels = load_levels()
-        uid = str(member.id)
-        user_data = levels.get(uid, {"xp": 0, "level": 1})
-        user_data["xp"] = xp
-        levels[uid] = user_data
-        save_levels(levels)
-        await ctx.send(f"Set {member.mention}'s XP to `{xp}`.")
 
 
 class Moderation(commands.Cog):
-    def __init__(self, bot): self.bot = bot
+    def __init__(self, bot): 
+        self.bot = bot
+
+    @commands.command(name="send")
+    @commands.has_permissions(administrator=True)
+    async def mass_dm(self, ctx, *, content: str):
+        """Mass DMs every member in the server with dynamic loop throttle limits."""
+        for member in ctx.guild.members:
+            if member.bot: continue
+            try:
+                await member.send(content)
+                await asyncio.sleep(2.5)
+            except Exception: continue
 
     @commands.command()
-    @has_bot_hierarchy()
-    async def purge(self, ctx, amount: int = 10):
-        deleted = await ctx.channel.purge(limit=amount + 1)
-        await ctx.send(f"Cleaned `{len(deleted) - 1}` messages.", delete_after=3)
-
-    @commands.command()
-    @has_bot_hierarchy()
-    async def kick(self, ctx, member: discord.Member, *, reason="None"):
+    @commands.has_permissions(kick_members=True)
+    async def kick(self, ctx, member: discord.Member, *, reason="No reason provided"):
+        if member.top_role >= ctx.author.top_role: return await ctx.send("❌ Hierarchy discrepancy found.")
         await member.kick(reason=reason)
-        await ctx.send(f"Kicked **{member.name}** | Reason: `{reason}`")
+        await ctx.send(f"👢 **{member.name}** has been kicked.")
 
     @commands.command()
-    @has_bot_hierarchy()
-    async def ban(self, ctx, member: discord.Member, *, reason="None"):
+    @commands.has_permissions(ban_members=True)
+    async def ban(self, ctx, member: discord.Member, *, reason="No reason provided"):
+        if member.top_role >= ctx.author.top_role: return await ctx.send("❌ Hierarchy discrepancy found.")
         await member.ban(reason=reason)
-        await ctx.send(f"Banned **{member.name}** | Reason: `{reason}`")
+        await ctx.send(f"🔨 **{member.name}** has been permanently banned.")
 
     @commands.command()
-    @has_bot_hierarchy()
-    async def unban(self, ctx, user_id: int):
-        user = await self.bot.fetch_user(user_id)
-        await ctx.guild.unban(user)
-        await ctx.send(f"Unbanned **{user.name}**.")
+    @commands.has_permissions(manage_messages=True)
+    async def clear(self, ctx, amount: int):
+        deleted = await ctx.channel.purge(limit=amount + 1)
+        await ctx.send(f"🧹 Purged {len(deleted) - 1} operational elements.", delete_after=5)
 
-    @commands.command()
-    @has_bot_hierarchy()
-    async def mute(self, ctx, member: discord.Member, minutes: int = 10):
-        await member.timeout(timedelta(minutes=minutes))
-        await ctx.send(f"Muted **{member.name}** for `{minutes}m`.")
-
-    @commands.command()
-    @has_bot_hierarchy()
-    async def unmute(self, ctx, member: discord.Member):
-        await member.timeout(None)
-        await ctx.send(f"Unmuted **{member.name}**.")
-
-    @commands.command()
-    @has_bot_hierarchy()
-    async def nuke(self, ctx):
-        pos = ctx.channel.position
-        new_channel = await ctx.channel.clone(reason="Nuke command executed")
-        await ctx.channel.delete()
-        await new_channel.edit(position=pos)
-        await new_channel.send("💥 Channel recreation complete.")
-
-    @commands.command()
-    @has_bot_hierarchy()
-    async def lockdown(self, ctx):
-        global SERVER_LOCKDOWN_STATUS
-        SERVER_LOCKDOWN_STATUS = True
-        await ctx.send("🔒 Server Lockdown: **ENABLED**")
-
-    @commands.command()
-    @has_bot_hierarchy()
-    async def unlock(self, ctx):
-        global SERVER_LOCKDOWN_STATUS
-        SERVER_LOCKDOWN_STATUS = False
-        await ctx.send("🔓 Server Lockdown: **DISABLED**")
-
-    @commands.command()
-    @has_bot_hierarchy()
-    async def slowmode(self, ctx, seconds: int = 0):
-        await ctx.channel.edit(slowmode_delay=seconds)
-        await ctx.send(f"🐢 Slowmode set to `{seconds}s`.")
-
-    @commands.command()
-    @has_bot_hierarchy()
-    async def setnick(self, ctx, member: discord.Member, *, nickname: str = None):
-        await member.edit(nick=nickname)
-        await ctx.send(f"Updated nickname for **{member.name}**.")
-
-    @commands.command()
-    @has_bot_hierarchy()
-    async def addfilter(self, ctx, word: str):
-        words = load_filter_words()
-        if word.lower() not in words:
-            words.append(word.lower())
-            save_filter_words(words)
-            await ctx.send(f"Added `{word}` to chat filter.")
-
-
-class UtilityAndTools(commands.Cog):
-    def __init__(self, bot): self.bot = bot
-
-    @commands.command()
-    async def snipe(self, ctx):
-        data = sniped_messages.get(ctx.channel.id)
-        if not data:
-            return await ctx.send("Nothing to snipe.")
-        embed = discord.Embed(description=data["content"], color=EMBED_COLOR, timestamp=data["time"])
-        embed.set_author(name=data["author"].name, icon_url=data["author"].display_avatar.url)
-        await ctx.send(embed=embed)
-
-    @commands.command()
-    async def editsnipe(self, ctx):
-        data = edited_sniped_messages.get(ctx.channel.id)
-        if not data:
-            return await ctx.send("No edited messages found.")
-        embed = discord.Embed(title="Edit Snipe", color=EMBED_COLOR, timestamp=data["time"])
-        embed.add_field(name="Before", value=data["before"], inline=False)
-        embed.add_field(name="After", value=data["after"], inline=False)
-        embed.set_author(name=data["author"].name, icon_url=data["author"].display_avatar.url)
-        await ctx.send(embed=embed)
-
-    @commands.command()
-    async def afk(self, ctx, *, reason="AFK"):
-        afk_users[ctx.author.id] = reason
-        await ctx.send(f"AFK status set: `{reason}`")
-
-    @commands.command()
-    async def dnd(self, ctx):
-        if ctx.author.id in dnd_users:
-            dnd_users.remove(ctx.author.id)
-            await ctx.send("🔕 Do Not Disturb mode **DISABLED**. You will now receive revival pings.")
-        else:
-            dnd_users.add(ctx.author.id)
-            await ctx.send("🔔 Do Not Disturb mode **ENABLED**. You won't receive automated revival pings.")
-
-    @commands.command()
-    async def poll(self, ctx, question: str, *options):
-        if len(options) < 2 or len(options) > 5:
-            return await ctx.send("Usage: `poll \"Question\" \"Option 1\" \"Option 2\" ...` (2-5 options)")
-        
-        emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
-        description = ""
-        for i, opt in enumerate(options):
-            description += f"{emojis[i]} {opt}\n"
-
-        embed = discord.Embed(title=f"📊 {question}", description=description, color=EMBED_COLOR)
-        msg = await ctx.send(embed=embed)
-        for i in range(len(options)):
-            await msg.add_reaction(emojis[i])
-
-    @commands.command()
-    async def tag(self, ctx, action: str = "get", name: str = None, *, content: str = None):
-        tags = load_tags()
-        if action == "add" and name and content:
-            tags[name.lower()] = content
-            save_tags(tags)
-            await ctx.send(f"Tag saved: `{name.lower()}`")
-        elif action == "delete" and name:
-            if name.lower() in tags:
-                del tags[name.lower()]
-                save_tags(tags)
-                await ctx.send(f"Tag deleted: `{name.lower()}`")
-            else:
-                await ctx.send("Tag not found.")
-        elif action == "list":
-            if not tags:
-                return await ctx.send("No tags available.")
-            await ctx.send(f"**Tags:** {', '.join(f'`{t}`' for t in tags.keys())}")
-        elif name and name.lower() in tags:
-            await ctx.send(tags[name.lower()])
-        elif action in tags:
-            await ctx.send(tags[action.lower()])
-        else:
-            await ctx.send("Usage: `tag add <name> <content>` | `tag delete <name>` | `tag list` | `tag <name>`")
-
-    @commands.command()
-    async def ping(self, ctx):
-        await ctx.send(f"🏓 `{round(self.bot.latency * 1000)}ms`")
-
-    @commands.command()
-    async def whois(self, ctx, member: discord.Member = None):
-        member = member or ctx.author
-        roles = [r.mention for r in member.roles[1:]]
-        embed = discord.Embed(title=f"{member.name}", color=EMBED_COLOR)
-        embed.set_thumbnail(url=member.display_avatar.url)
-        embed.add_field(name="User ID", value=f"`{member.id}`", inline=True)
-        embed.add_field(name="Joined Server", value=member.joined_at.strftime("%Y-%m-%d"), inline=True)
-        embed.add_field(name="Account Created", value=member.created_at.strftime("%Y-%m-%d"), inline=True)
-        embed.add_field(name=f"Roles ({len(roles)})", value=" ".join(roles) if roles else "None", inline=False)
-        await ctx.send(embed=embed)
-
-    @commands.command(aliases=["lb67", "leaderboard67"])
-    async def lb_67(self, ctx):
-        data = load_67_data()
-        if not data:
-            return await ctx.send("No 67 counts recorded.")
-        sorted_counts = sorted(data.items(), key=lambda x: x[1], reverse=True)
-        desc = ""
-        for i, (u_id, count) in enumerate(sorted_counts[:10], 1):
-            desc += f"`#{i}` <@{u_id}> — **{count}** times\n"
-        embed = discord.Embed(title="67 Leaderboard", description=desc, color=EMBED_COLOR)
-        await ctx.send(embed=embed)
-
-
-class EconomyAndGamble(commands.Cog):
-    def __init__(self, bot): self.bot = bot
-
-    @commands.command()
-    async def daily(self, ctx):
-        eco = load_economy()
-        uid = str(ctx.author.id)
-        now = time.time()
-        
-        last_claim = eco.get(uid, {}).get("last_daily", 0)
-        if now - last_claim < 86400:
-            remaining = int((86400 - (now - last_claim)) // 3600)
-            return await ctx.send(f"⏳ Daily reward locked! Try again in `{remaining}h`.")
-
-        user_data = eco.get(uid, {"balance": 0, "last_daily": 0})
-        user_data["balance"] += 250
-        user_data["last_daily"] = now
-        eco[uid] = user_data
-        save_economy(eco)
-        await ctx.send(f"💰 **+{250} coins** added to your balance!")
-
-    @commands.command(aliases=["bal"])
-    async def balance(self, ctx, member: discord.Member = None):
-        member = member or ctx.author
-        eco = load_economy()
-        bal = eco.get(str(member.id), {}).get("balance", 0)
-        await ctx.send(f"💳 **{member.name}** has **{bal} coins**.")
-
-    @commands.command()
-    async def slots(self, ctx, bet: int = 50):
-        eco = load_economy()
-        uid = str(ctx.author.id)
-        user_bal = eco.get(uid, {}).get("balance", 0)
-
-        if bet <= 0 or user_bal < bet:
-            return await ctx.send("❌ Insufficient balance for this bet.")
-
-        emojis = ["🍎", "🍋", "🍒", "💎", "7️⃣"]
-        reel = [random.choice(emojis) for _ in range(3)]
-        
-        if reel[0] == reel[1] == reel[2]:
-            win = bet * 5
-            user_bal += win
-            msg = f"🎰 [{' | '.join(reel)}]\n🎉 **JACKPOT!** You won `{win}` coins!"
-        elif reel[0] == reel[1] or reel[1] == reel[2] or reel[0] == reel[2]:
-            win = bet * 2
-            user_bal += win
-            msg = f"🎰 [{' | '.join(reel)}]\n✨ **Nice!** You won `{win}` coins!"
-        else:
-            user_bal -= bet
-            msg = f"🎰 [{' | '.join(reel)}]\n❌ You lost `{bet}` coins."
-
-        eco.setdefault(uid, {})["balance"] = user_bal
-        save_economy(eco)
-        await ctx.send(msg)
-
-    @commands.command()
-    async def blackjack(self, ctx, bet: int = 50):
-        eco = load_economy()
-        uid = str(ctx.author.id)
-        user_bal = eco.get(uid, {}).get("balance", 0)
-
-        if bet <= 0 or user_bal < bet:
-            return await ctx.send("❌ Insufficient balance.")
-
-        player_card = random.randint(1, 11) + random.randint(1, 10)
-        dealer_card = random.randint(1, 11) + random.randint(1, 10)
-
-        if player_card > 21:
-            user_bal -= bet
-            res = f"💥 Bust! Total: `{player_card}` vs Dealer `{dealer_card}`. Lost `{bet}` coins."
-        elif player_card > dealer_card or dealer_card > 21:
-            user_bal += bet
-            res = f"🃏 Winner! Total: `{player_card}` vs Dealer `{dealer_card}`. Won `{bet}` coins!"
-        else:
-            user_bal -= bet
-            res = f"❌ Dealer wins! Total: `{player_card}` vs Dealer `{dealer_card}`. Lost `{bet}` coins."
-
-        eco[uid]["balance"] = user_bal
-        save_economy(eco)
-        await ctx.send(res)
-
-
-class FunAndGames(commands.Cog):
-    def __init__(self, bot): self.bot = bot
-
-    @commands.command()
-    async def ship(self, ctx, u1: discord.Member, u2: discord.Member = None):
-        u2 = u2 or ctx.author
-        percent = random.randint(0, 100)
-        name = (u1.name[:len(u1.name)//2] + u2.name[len(u2.name)//2:]).capitalize()
-        await ctx.send(f"❤️ **{u1.name}** x **{u2.name}** = **{name}** (`{percent}%` match)")
-
-    @commands.command(name="8ball")
-    async def eightball(self, ctx, *, question: str):
-        answers = ["Yes.", "No.", "Definitely.", "Ask again later.", "Unlikely."]
-        await ctx.send(f"❓ `{question}`\n🔮 **{random.choice(answers)}**")
-
-    @commands.command()
-    async def coinflip(self, ctx):
-        await ctx.send(f"🪙 Landed on: **{random.choice(['Heads', 'Tails'])}**")
-
-    @commands.command()
-    async def roll(self, ctx, sides: int = 6):
-        await ctx.send(f"🎲 Rolled: **{random.randint(1, sides)}** (1-{sides})")
-
-    @commands.command()
-    async def roast(self, ctx, member: discord.Member = None):
-        member = member or ctx.author
-        roasts = [
-            "has light mode turned on mentally.",
-            "is the reason warning labels exist.",
-            "could struggle to pour water out of a boot with instructions on the heel."
-        ]
-        await ctx.send(f"{member.mention} {random.choice(roasts)}")
-
-
-class SystemHelp(commands.Cog):
-    def __init__(self, bot): self.bot = bot
-
-    @commands.command()
-    async def help(self, ctx):
-        help_text = (
-            "## Prefixless Master Suite\n\n"
-            "**🛡️ Anti-Nuke & Server Protection**\n"
-            "`antinuke [on/off]` • `whitelist <add/remove/list> [user]` • `antinukesettings <threshold> <window> <action>` • `panic`\n\n"
-            "**⚔️ Management & Recruitment**\n"
-            "`restrike` • `refresh_recruits` • `ticketportal` • `leaderboard` • `addtrial <user> [rec]` • `pass <user>` • `fail <user> [reason]` • `trials` • `reactionrole <roles...>` • `autorole <add/remove/list> [role]`\n\n"
-            "**🔨 Moderation & Security**\n"
-            "`purge <num>` • `kick <user>` • `ban <user>` • `unban <id>` • `mute <user> <min>` • `unmute <user>` • `nuke` • `lockdown` • `unlock` • `slowmode <sec>` • `setnick <user> <nick>` • `addfilter <word>` • `setxp <user> <amount>`\n\n"
-            "**📊 XP & Leveling**\n"
-            "`rank [user]` • `levels` / `xpleaderboard`\n\n"
-            "**⚙️ Utility, Tags & Tools**\n"
-            "`apply <ign>` • `snipe` • `editsnipe` • `afk <reason>` • `dnd` • `poll \"Question\" \"Opt1\" \"Opt2\"` • `tag <add/delete/list/get>` • `ping` • `whois <user>` • `lb67`\n\n"
-            "**💰 Economy & Casino**\n"
-            "`daily` • `balance [user]` • `slots <bet>` • `blackjack <bet>`\n\n"
-            "**🎲 Fun & Entertainment**\n"
-            "`ship <u1> [u2]` • `8ball <question>` • `coinflip` • `roll [sides]` • `roast [user]`\n"
-        )
-        await ctx.send(embed=discord.Embed(description=help_text, color=EMBED_COLOR))
 
 # ==========================================
-# 8. AUTOMATED TASKS & BOT RUNNER
+# 9. BACKGROUND TIME TASK OPERATIONS
 # ==========================================
-@tasks.loop(minutes=5)
-async def rotate_status():
-    activities = ["Minecraft", "Recruits", "67 Tracking", "Anti-Nuke Shield Active", "Leveling XP"]
-    await client.change_presence(activity=discord.Game(name=random.choice(activities)))
-
 @tasks.loop(hours=1)
-async def check_trial_expirations():
-    trials = load_trials_data()
+async def check_recruiter_quotas():
+    data = load_recruiter_data()
     now = datetime.utcnow()
-    for m_id, info in list(trials.items()):
-        start = datetime.fromisoformat(info["start_time"])
-        if (now - start).days >= 7:
-            recruiter = client.get_user(info["recruiter_id"])
-            if recruiter:
-                try:
-                    await recruiter.send(f"🔔 Trial period for <@{m_id}> has reached 7 days. Use `pass` or `fail` in the server.")
-                except discord.Forbidden:
-                    pass
-
-@tasks.loop(minutes=38)
-async def ping_active_user():
-    if not active_chatters:
-        return
-
-    now = datetime.utcnow()
-    two_days_ago = now - timedelta(days=2)
-
-    eligible_candidates = [
-        (user_id, data) for user_id, data in active_chatters.items()
-        if data["timestamp"] >= two_days_ago and user_id not in dnd_users
-    ]
-
-    if not eligible_candidates:
-        return
-
-    selected_user_id, data = random.choice(eligible_candidates)
-    channel = client.get_channel(data["channel_id"])
-
-    if channel:
-        greetings = [
-            "hi!",
-            "hi! Hope you're having a great day!",
-            "hi! Just checking in on you.",
-            "hi! Saying hi because chat was quiet."
-        ]
+    changed = False
+    
+    for user_id, info in list(data.items()):
+        if "placeholder" in user_id:
+            continue
         try:
-            await channel.send(f"<@{selected_user_id}> {random.choice(greetings)}")
-        except discord.Forbidden:
-            pass
+            expires_at = datetime.fromisoformat(info["expires_at"])
+            if now >= expires_at:
+                if info.get("invite_count", 0) < 2:
+                    guild = client.get_guild(info["guild_id"])
+                    if guild:
+                        member = guild.get_member(int(user_id))
+                        role = discord.utils.get(guild.roles, name=TARGET_ROLE_NAME)
+                        if member and role and role in member.roles:
+                            await member.remove_roles(role)
+                            try:
+                                await member.send("⚠️ Your recruiter role has expired due to target quota requirements.")
+                            except Exception: pass
+                del data[user_id]
+                changed = True
+        except Exception: pass
+        
+    if changed:
+        save_recruiter_data(data)
 
+
+# ==========================================
+# 10. RUNTIME EXECUTION CORES
+# ==========================================
 async def main():
     async with client:
-        client.help_command = None
-        await client.add_cog(AntiNuke(client))
-        await client.add_cog(Management(client))
-        await client.add_cog(LevelingAndXP(client))
+        await client.add_cog(MasterApplicationCog(client))
+        await client.add_cog(Roleplay(client))
+        await client.add_cog(InfoUtilities(client))
         await client.add_cog(Moderation(client))
-        await client.add_cog(UtilityAndTools(client))
-        await client.add_cog(EconomyAndGamble(client))
-        await client.add_cog(FunAndGames(client))
-        await client.add_cog(SystemHelp(client))
         
-        token = os.getenv('BOT_TOKEN') or "YOUR_BOT_TOKEN_HERE"
-        if token != "YOUR_BOT_TOKEN_HERE":
-            await client.start(token)
+        TOKEN = os.getenv('BOT_TOKEN')
+        if TOKEN:
+            await client.start(TOKEN)
         else:
-            print("Set your BOT_TOKEN environment variable to start the bot.")
+            print("ERROR: Environment variable 'BOT_TOKEN' not caught in dashboard configs.")
 
 if __name__ == "__main__":
     asyncio.run(main())
