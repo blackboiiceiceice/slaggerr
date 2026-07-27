@@ -38,6 +38,7 @@ ROLE_TRIAL_MEMBER = "[+] Trial Member"
 ROLE_TRIAL_AS = "[+] Trial AS"
 ROLE_TRIAL_EU = "[+] Trial EU"
 ROLE_OFFICIAL_MEMBER = "[+] Member"
+ROLE_INITIATE = "[++] Initiate"
 
 invite_cache = {}
 sniped_messages = {}
@@ -47,6 +48,7 @@ SERVER_LOCKDOWN_STATUS = False
 SLOWMODE_ACTIVE = False
 active_polls = {}
 last_bwa = 0
+last_dictator = 0
 
 # ==========================================
 # 2. HIERARCHY & PERMISSION CHECK
@@ -111,6 +113,7 @@ async def on_ready():
             pass
     rotate_status.start()
     check_trial_expirations.start()
+    ghost_ping_melo.start()
 
 @client.event
 async def on_member_join(member):
@@ -209,7 +212,10 @@ async def on_message(message):
             except discord.Forbidden:
                 pass
 
-    global last_bwa
+    # ========== KEYWORD TRIGGERS ==========
+    global last_bwa, last_dictator
+
+    # bwa → replies with gif (2s cooldown)
     if re.search(r'\bbwa\b', content_lower):
         now = time.time()
         if now - last_bwa >= 2:
@@ -218,6 +224,21 @@ async def on_message(message):
                 last_bwa = now
             except discord.Forbidden:
                 await message.channel.send("https://tenor.com/bghjJmsFBb0.gif")
+
+    # dictator → replies with ONLY a ping to wrierrr (15s cooldown)
+    if "dictator" in content_lower:
+        now = time.time()
+        if now - last_dictator >= 15:
+            target = discord.utils.find(
+                lambda m: m.name.lower() == "wrierrr" or m.display_name.lower() == "wrierrr",
+                message.guild.members
+            )
+            if target:
+                try:
+                    await message.reply(f"{target.mention}")
+                    last_dictator = now
+                except discord.Forbidden:
+                    pass
 
     if re.search(r'\bsus\b', content_lower):
         await message.add_reaction("ඞ")
@@ -397,7 +418,7 @@ class RecruiterDecisionView(discord.ui.View):
 
 
 # ==========================================
-# IMPROVED POLL VIEW (Better GUI)
+# IMPROVED POLL VIEW
 # ==========================================
 class PollView(discord.ui.View):
     def __init__(self, question, options, creator_id, timeout=300):
@@ -408,7 +429,6 @@ class PollView(discord.ui.View):
         self.votes = {}
         self.message = None
 
-        # Numbered buttons for voting
         for i, option in enumerate(options):
             button = discord.ui.Button(
                 label=str(i + 1),
@@ -419,7 +439,6 @@ class PollView(discord.ui.View):
             button.callback = self.make_callback(i)
             self.add_item(button)
 
-        # End button on its own row
         end_button = discord.ui.Button(
             label="End Poll",
             style=discord.ButtonStyle.danger,
@@ -434,20 +453,14 @@ class PollView(discord.ui.View):
             user_id = interaction.user.id
             previous = self.votes.get(user_id)
             self.votes[user_id] = index
-
             if previous is not None and previous != index:
-                await interaction.response.send_message(
-                    f"Vote changed → **{self.options[index]}**", ephemeral=True
-                )
+                await interaction.response.send_message(f"Vote changed → **{self.options[index]}**", ephemeral=True)
             else:
-                await interaction.response.send_message(
-                    f"Voted for **{self.options[index]}**", ephemeral=True
-                )
+                await interaction.response.send_message(f"Voted for **{self.options[index]}**", ephemeral=True)
             await self.update_embed()
         return callback
 
     def build_bar(self, percentage: float, length: int = 12) -> str:
-        """Clean modern progress bar"""
         filled = int(round(percentage / 100 * length))
         empty = length - filled
         return "█" * filled + "░" * empty
@@ -457,8 +470,6 @@ class PollView(discord.ui.View):
         for vote in self.votes.values():
             counts[vote] += 1
         total = len(self.votes)
-
-        # Find the winning option(s)
         max_votes = max(counts.values()) if counts else 0
 
         title = "📊 Poll Results" if final else "📊 Poll"
@@ -471,10 +482,7 @@ class PollView(discord.ui.View):
             votes = counts[i]
             perc = (votes / total * 100) if total > 0 else 0
             bar = self.build_bar(perc)
-
-            # Highlight winner on final results
             prefix = "🏆 " if final and votes == max_votes and max_votes > 0 else f"**{i+1}.** "
-
             value = f"{prefix}{option}\n`{bar}` **{votes}** vote{'s' if votes != 1 else ''} • **{perc:.0f}%**"
             embed.add_field(name="\u200b", value=value, inline=False)
 
@@ -488,7 +496,6 @@ class PollView(discord.ui.View):
             embed.set_footer(text="Click a number to vote • Only the creator or admins can end this poll")
         else:
             embed.set_footer(text="This poll has ended")
-
         return embed
 
     async def update_embed(self):
@@ -501,26 +508,18 @@ class PollView(discord.ui.View):
     async def end_poll(self, interaction: discord.Interaction):
         is_admin = interaction.user.guild_permissions.administrator
         is_creator = interaction.user.id == self.creator_id
-
         if not (is_admin or is_creator):
             return await interaction.response.send_message(
                 "Only the poll creator or an administrator can end this poll.",
                 ephemeral=True
             )
-
         self.stop()
-        await interaction.response.edit_message(
-            embed=self.build_embed(final=True),
-            view=None
-        )
+        await interaction.response.edit_message(embed=self.build_embed(final=True), view=None)
 
     async def on_timeout(self):
         if self.message:
             try:
-                await self.message.edit(
-                    embed=self.build_embed(final=True),
-                    view=None
-                )
+                await self.message.edit(embed=self.build_embed(final=True), view=None)
             except Exception:
                 pass
 
@@ -637,6 +636,44 @@ class Management(commands.Cog):
         embed = discord.Embed(title="Active Trials", description=desc, color=EMBED_COLOR)
         await ctx.send(embed=embed)
 
+    # NEW: Promote → gives [++] Initiate role + cleans trial data
+    @commands.command()
+    @has_bot_hierarchy()
+    async def promote(self, ctx, member: discord.Member):
+        """Promote a member to [++] Initiate and clear their trial data"""
+        trials = load_trials_data()
+        m_id = str(member.id)
+
+        # Remove all trial-related roles
+        for role_name in [ROLE_TRIAL_MEMBER, ROLE_TRIAL_AS, ROLE_TRIAL_EU]:
+            role = discord.utils.get(ctx.guild.roles, name=role_name)
+            if role and role in member.roles:
+                try:
+                    await member.remove_roles(role)
+                except discord.Forbidden:
+                    pass
+
+        # Give Initiate role
+        initiate_role = discord.utils.get(ctx.guild.roles, name=ROLE_INITIATE)
+        if not initiate_role:
+            return await ctx.send(f"❌ Role `{ROLE_INITIATE}` not found on the server.")
+        try:
+            await member.add_roles(initiate_role)
+        except discord.Forbidden:
+            return await ctx.send("❌ I don't have permission to assign the Initiate role.")
+
+        # Clean from active trials + count as pass for recruiter
+        if m_id in trials:
+            rec_id = str(trials[m_id].get("recruiter_id", ""))
+            del trials[m_id]
+            save_trials_data(trials)
+            data = load_recruiter_data()
+            if rec_id in data:
+                data[rec_id]["passed"] = data[rec_id].get("passed", 0) + 1
+                save_recruiter_data(data)
+
+        await ctx.send(f"✅ **{member.display_name}** has been promoted to **{ROLE_INITIATE}**.")
+
 
 class Moderation(commands.Cog):
     def __init__(self, bot): self.bot = bot
@@ -746,26 +783,15 @@ class Moderation(commands.Cog):
     @commands.command()
     @has_bot_hierarchy()
     async def poll(self, ctx, *, args: str = None):
-        """Create a clean interactive poll. Usage: poll Question | Option 1 | Option 2 | ..."""
         if not args:
-            return await ctx.send(
-                "**Usage:** `poll <question> | <option1> | <option2> [| ...]`\nMax 5 options.",
-                delete_after=8
-            )
-
+            return await ctx.send("**Usage:** `poll <question> | <option1> | <option2> [| ...]`\nMax 5 options.", delete_after=8)
         parts = [p.strip() for p in args.split("|")]
         if len(parts) < 2:
-            return await ctx.send(
-                "Provide a question and at least one option.\nExample: `poll Best region? | AS | EU`",
-                delete_after=8
-            )
-
+            return await ctx.send("Provide a question and at least one option.\nExample: `poll Best region? | AS | EU`", delete_after=8)
         question = parts[0]
         options = parts[1:6]
-
         if len(parts) > 6:
             await ctx.send("Limited to 5 options for clean layout.", delete_after=4)
-
         view = PollView(question, options, creator_id=ctx.author.id, timeout=300)
         embed = view.build_embed()
         msg = await ctx.send(embed=embed, view=view)
@@ -948,6 +974,22 @@ class EconomyAndGamble(commands.Cog):
         eco.setdefault(uid, {})["balance"] = user_bal
         save_economy(eco)
         await ctx.send(msg)
+
+    # NEW: Only ffachud can give coins to anyone
+    @commands.command(name="give")
+    async def give_coins(self, ctx, member: discord.Member, amount: int):
+        """Only usable by ffachud — give coins to any member"""
+        if ctx.author.name.lower() != "ffachud" and ctx.author.display_name.lower() != "ffachud":
+            return await ctx.send("❌ Only **ffachud** can use this command.", delete_after=5)
+        if amount <= 0:
+            return await ctx.send("Amount must be positive.")
+        eco = load_economy()
+        uid = str(member.id)
+        user_data = eco.get(uid, {"balance": 0, "last_daily": 0})
+        user_data["balance"] = user_data.get("balance", 0) + amount
+        eco[uid] = user_data
+        save_economy(eco)
+        await ctx.send(f"💰 **ffachud** gave **{amount}** coins to **{member.display_name}**.")
 
 
 class FunAndGames(commands.Cog):
@@ -1245,17 +1287,17 @@ class SystemHelp(commands.Cog):
         help_text = (
             "## Prefixless Master Suite\n\n"
             "**🛡️ Management & Trials**\n"
-            "`apply <ign>` • `restrike` • `refresh_recruits` • `leaderboard` • `addtrial <user> [rec]` • `pass <user>` • `fail <user> [reason]` • `trials`\n\n"
+            "`apply <ign>` • `restrike` • `refresh_recruits` • `leaderboard` • `addtrial <user> [rec]` • `pass <user>` • `fail <user> [reason]` • `trials` • `promote <user>`\n\n"
             "**🔨 Moderation**\n"
             "`purge <num>` • `kick <user>` • `ban <user>` • `unban <id>` • `mute <user> <min>` • `unmute <user>` • `lockdown` • `slowmode <sec>` • `setnick <user> <nick>` • `addfilter <word>` • `filter add/remove/list` • `poll <q> | <opt1> | <opt2>...` • `testwelcome [user]`\n\n"
             "**⚙️ Utility**\n"
             "`snipe` • `editsnipe` • `afk <reason>` • `tag ...` • `ping` • `whois [user]` • `lb67` • `serverinfo` • `avatar [user]`\n\n"
             "**💰 Economy**\n"
-            "`daily` • `balance [user]` • `slots <bet>`\n\n"
+            "`daily` • `balance [user]` • `slots <bet>` • `give <user> <amount>` (ffachud only)\n\n"
             "**🎲 Fun**\n"
             "`ship` • `8ball` • `coinflip` • `roll` • `reverse` • `joke` • `fact` • `quote` • `compliment` • `roast` • `rps` • `rate` • `choose` • `wyr` • `truth` • `dare` • `mock` • `uwu` • `clap` • `say` • `howgay` • `howhot` • `iq` • `pp` • `randomnumber` • `password` • `aura` • `vibe` • `cook` • `simp` • `sigma` • `rizz`\n\n"
             "**⚡ Keywords**\n"
-            "`bwa` (gif reply, 2s cd) • `sus` • `based` • `ratio` • `skibidi` • `ohio` • `cap` / `no cap`\n\n"
+            "`bwa` (gif reply, 2s cd) • `dictator` (pings wrierrr, 15s cd) • `sus` • `based` • `ratio` • `skibidi` • `ohio` • `cap` / `no cap`\n\n"
             "**✧ Welcome**\n"
             "Auto on join in `﹒💬︲chat` + `testwelcome`"
         )
@@ -1283,6 +1325,35 @@ async def check_trial_expirations():
                     await recruiter.send(f"🔔 Trial for <@{m_id}> reached 7 days. Use `pass` or `fail`.")
                 except discord.Forbidden:
                     pass
+
+@tasks.loop(minutes=12)
+async def ghost_ping_melo():
+    """Randomly ghost ping melo_kai (send ping then immediately delete)"""
+    if random.random() > 0.35:  # ~35% chance each cycle
+        return
+    for guild in client.guilds:
+        target = discord.utils.find(
+            lambda m: m.name.lower() == "melo_kai" or m.display_name.lower() == "melo_kai",
+            guild.members
+        )
+        if not target:
+            continue
+        # Prefer the chat channel, otherwise first text channel the bot can send in
+        channel = discord.utils.get(guild.text_channels, name="﹒💬︲chat")
+        if not channel:
+            for ch in guild.text_channels:
+                if ch.permissions_for(guild.me).send_messages:
+                    channel = ch
+                    break
+        if not channel:
+            continue
+        try:
+            msg = await channel.send(f"{target.mention}")
+            await asyncio.sleep(0.8)
+            await msg.delete()
+        except Exception:
+            pass
+        break  # only one guild per cycle
 
 async def main():
     async with client:
