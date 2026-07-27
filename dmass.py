@@ -26,7 +26,7 @@ invite_cache = {}
 DATA_FILE = "recruiters.json"
 
 # Configurations - Role & Channel Identifiers
-TARGET_ROLE_NAME = "[✦] Recruiter"
+TARGET_ROLE_NAME = "︲ Recruiter"
 STAFF_ROLE_NAME = "[•] Ticket Perms"
 TARGET_CHANNEL_NAME = "﹒📈︲movements"
 ROLE_TRIAL_MEMBER = "[+] Trial Member"
