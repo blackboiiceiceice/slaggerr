@@ -1,5 +1,5 @@
 """
-Heaven Recruiter Bot — Clean Version
+Heaven Recruiter Bot — Master Version (Fixed)
 """
 
 from __future__ import annotations
@@ -214,10 +214,10 @@ class HeavenBot(commands.Bot):
             help_command=None,
         )
         self.invite_cache: Dict[int, Dict[str, int]] = {}
-        self.http: Optional[aiohttp.ClientSession] = None
+        self.session: Optional[aiohttp.ClientSession] = None
 
     async def setup_hook(self) -> None:
-        self.http = aiohttp.ClientSession()
+        self.session = aiohttp.ClientSession()
         await store.load()
 
         self.add_view(RecruiterLaunchView())
@@ -232,8 +232,8 @@ class HeavenBot(commands.Bot):
         check_recruiter_quotas.start()
 
     async def close(self) -> None:
-        if self.http and not self.http.closed:
-            await self.http.close()
+        if self.session and not self.session.closed:
+            await self.session.close()
         await super().close()
 
     async def on_ready(self) -> None:
@@ -445,7 +445,7 @@ class RecruitApplicationModal(discord.ui.Modal, title="Heaven Team Recruitment")
 
         await interaction.response.defer(ephemeral=True)
 
-        player = await fetch_namemc(bot.http, self.ign.value)
+        player = await fetch_namemc(bot.session, self.ign.value)
         answers = {
             "ign": self.ign.value,
             "tier": self.tier.value or "Unrated",
@@ -574,7 +574,7 @@ class ApplicationCog(commands.Cog):
             return await ctx.send("Usage: `;apply <Minecraft_Username>`")
 
         msg = await ctx.send(f"Looking up `{minecraft_username}`…")
-        data = await fetch_namemc(self.bot.http, minecraft_username)
+        data = await fetch_namemc(self.bot.session, minecraft_username)
         await msg.delete()
 
         if not data:
