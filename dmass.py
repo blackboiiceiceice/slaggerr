@@ -1,6 +1,5 @@
 """
-Heaven Recruiter Bot — Final Clean Version
-Mention replies completely removed
+Heaven Recruiter Bot — Clean Version
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ from discord.ext import commands, tasks
 from bs4 import BeautifulSoup
 
 # ──────────────────────────────────────────────
-# Logging (so we can actually see errors)
+# Logging
 # ──────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -270,7 +269,7 @@ class HeavenBot(commands.Bot):
         if message.author.bot:
             return
 
-        # ── Dictator feature only ─────────────────────────
+        # Dictator feature
         content = message.content.lower()
         if "dictator" in content:
             target = discord.utils.find(
@@ -285,7 +284,7 @@ class HeavenBot(commands.Bot):
                 await message.channel.send("Could not find `wrierrr` in this server.")
             return
 
-        # NO mention reply code exists anymore
+        # No mention reply code
         await self.process_commands(message)
 
 
