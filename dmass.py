@@ -1,5 +1,5 @@
 """
-Heaven Recruiter Bot — Master Version (Fixed)
+Heaven Recruiter Bot — Master + Heist Economy + Fun Commands + Z+ Security
 """
 
 from __future__ import annotations
@@ -8,6 +8,8 @@ import asyncio
 import json
 import logging
 import os
+import random
+import string
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -44,18 +46,32 @@ class Config:
     RECRUITER_QUOTA: int = 2
     RECRUITER_TRIAL_DAYS: int = 7
     DATA_FILE: Path = Path("recruiters.json")
+    ECONOMY_FILE: Path = Path("economy.json")
 
     EMBED_COLOR = discord.Color.from_str("#0b0b0a")
     ACCENT = discord.Color.from_str("#c9a227")
+    SUCCESS = discord.Color.from_str("#2ecc71")
+    DANGER = discord.Color.from_str("#e74c3c")
+    LOVE = discord.Color.from_str("#ff69b4")
 
     HTTP_TIMEOUT: float = 8.0
     VIEW_TIMEOUT: float = 600.0
+
+    # Economy
+    DAILY_MIN: int = 40
+    DAILY_MAX: int = 90
+    WORK_MIN: int = 15
+    WORK_MAX: int = 55
+    ROB_COOLDOWN: int = 3600
+    ROB_SUCCESS_CHANCE: float = 0.42
+    ROB_MAX_PERCENT: float = 0.28
+    MIN_ROB_AMOUNT: int = 25
 
 
 cfg = Config()
 
 # ──────────────────────────────────────────────
-# Data Store
+# Data Stores
 # ──────────────────────────────────────────────
 class RecruiterStore:
     def __init__(self, path: Path):
@@ -69,12 +85,11 @@ class RecruiterStore:
                 try:
                     self._data = json.loads(self.path.read_text(encoding="utf-8"))
                 except Exception as e:
-                    log.error("Failed loading data: %s", e)
+                    log.error("Failed loading recruiter data: %s", e)
                     self._data = {}
             else:
                 self._data = {}
 
-            # Seed data (remove later if you want)
             presets = {"yelpmaij": 4, "smite_01": 2, "hunterdme": 1}
             for name, pts in presets.items():
                 if not any(v.get("username") == name for v in self._data.values()):
@@ -136,7 +151,69 @@ class RecruiterStore:
             return entry["points"]
 
 
+class EconomyStore:
+    def __init__(self, path: Path):
+        self.path = path
+        self._lock = asyncio.Lock()
+        self._data: Dict[str, dict] = {}
+
+    async def load(self) -> None:
+        async with self._lock:
+            if self.path.exists():
+                try:
+                    self._data = json.loads(self.path.read_text(encoding="utf-8"))
+                except Exception:
+                    self._data = {}
+            else:
+                self._data = {}
+
+    async def _save_unlocked(self) -> None:
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self._data, indent=2), encoding="utf-8")
+        tmp.replace(self.path)
+
+    async def get_user(self, user_id: int) -> dict:
+        async with self._lock:
+            key = str(user_id)
+            if key not in self._data:
+                self._data[key] = {
+                    "wallet": 0,
+                    "bank": 0,
+                    "last_daily": None,
+                    "last_work": None,
+                    "last_rob": None,
+                    "total_earned": 0,
+                    "total_robbed": 0,
+                    "times_robbed": 0,
+                }
+                await self._save_unlocked()
+            return self._data[key]
+
+    async def update(self, user_id: int, **kwargs) -> dict:
+        async with self._lock:
+            key = str(user_id)
+            user = self._data.setdefault(key, {
+                "wallet": 0, "bank": 0, "last_daily": None,
+                "last_work": None, "last_rob": None,
+                "total_earned": 0, "total_robbed": 0, "times_robbed": 0,
+            })
+            user.update(kwargs)
+            await self._save_unlocked()
+            return user
+
+    async def add_wallet(self, user_id: int, amount: int) -> int:
+        user = await self.get_user(user_id)
+        new = max(0, user["wallet"] + amount)
+        await self.update(user_id, wallet=new, total_earned=user["total_earned"] + max(0, amount))
+        return new
+
+    async def all(self) -> Dict[str, dict]:
+        async with self._lock:
+            return dict(self._data)
+
+
 store = RecruiterStore(cfg.DATA_FILE)
+economy = EconomyStore(cfg.ECONOMY_FILE)
 
 # ──────────────────────────────────────────────
 # Helpers
@@ -152,7 +229,7 @@ def make_embed(title: str, description: str = None, color: discord.Color = None)
         color=color or cfg.EMBED_COLOR,
         timestamp=_utcnow(),
     )
-    e.set_footer(text="Heaven • Recruiter System")
+    e.set_footer(text="Heaven • Z+ Security")
     return e
 
 
@@ -173,7 +250,7 @@ async def fetch_namemc(session: aiohttp.ClientSession, username: str) -> Optiona
 
     history = [name]
     try:
-        headers = {"User-Agent": "HeavenBot/2.1"}
+        headers = {"User-Agent": "HeavenBot/3.1"}
         async with session.get(
             f"https://namemc.com/profile/{uuid}",
             headers=headers,
@@ -219,12 +296,15 @@ class HeavenBot(commands.Bot):
     async def setup_hook(self) -> None:
         self.session = aiohttp.ClientSession()
         await store.load()
+        await economy.load()
 
         self.add_view(RecruiterLaunchView())
         self.add_view(TicketActionView())
         self.add_view(RecruitLaunchView())
 
         await self.add_cog(ApplicationCog(self))
+        await self.add_cog(EconomyCog(self))
+        await self.add_cog(FunCog(self))
         await self.add_cog(RoleplayCog(self))
         await self.add_cog(InfoCog(self))
         await self.add_cog(ModerationCog(self))
@@ -240,6 +320,7 @@ class HeavenBot(commands.Bot):
         total = sum(g.member_count or 0 for g in self.guilds)
         log.info("Logged in as %s (%s)", self.user, self.user.id)
         log.info("Guilds: %d | Members: ~%d", len(self.guilds), total)
+        log.info("Z+ Security + Fun systems online")
 
         for guild in self.guilds:
             try:
@@ -247,8 +328,6 @@ class HeavenBot(commands.Bot):
                 self.invite_cache[guild.id] = {i.code: i.uses for i in invites}
             except discord.Forbidden:
                 log.warning("Missing invite permission in %s", guild.name)
-
-        log.info("Bot is ready.")
 
     async def on_member_join(self, member: discord.Member) -> None:
         guild = member.guild
@@ -269,7 +348,6 @@ class HeavenBot(commands.Bot):
         if message.author.bot:
             return
 
-        # Dictator feature
         content = message.content.lower()
         if "dictator" in content:
             target = discord.utils.find(
@@ -284,25 +362,29 @@ class HeavenBot(commands.Bot):
                 await message.channel.send("Could not find `wrierrr` in this server.")
             return
 
-        # No mention reply code
         await self.process_commands(message)
+
+    async def on_command_error(self, ctx: commands.Context, error: Exception):
+        if isinstance(error, commands.CommandOnCooldown):
+            await ctx.send(f"⏳ Cooldown: **{error.retry_after:.0f}s**", delete_after=5)
+        elif isinstance(error, commands.MissingPermissions):
+            await ctx.send("❌ Missing permissions.", delete_after=5)
+        elif isinstance(error, commands.BadArgument):
+            await ctx.send("❌ Invalid argument.", delete_after=5)
+        else:
+            log.exception("Error in %s: %s", ctx.command, error)
 
 
 bot = HeavenBot()
 
 # ──────────────────────────────────────────────
-# Views
+# Views (kept original)
 # ──────────────────────────────────────────────
 class RecruiterLaunchView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(
-        label="Apply for Recruiter",
-        style=discord.ButtonStyle.secondary,
-        emoji="💼",
-        custom_id="apply_recruiter_btn",
-    )
+    @discord.ui.button(label="Apply for Recruiter", style=discord.ButtonStyle.secondary, emoji="💼", custom_id="apply_recruiter_btn")
     async def apply(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
         member = interaction.user
@@ -310,17 +392,11 @@ class RecruiterLaunchView(discord.ui.View):
 
         role = discord.utils.get(guild.roles, name=cfg.RECRUITER_ROLE)
         if role and role in member.roles:
-            return await interaction.response.send_message(
-                "You already have the Recruiter role.", ephemeral=True
-            )
+            return await interaction.response.send_message("You already have the Recruiter role.", ephemeral=True)
 
-        existing = discord.utils.get(
-            guild.text_channels, name=f"recruiter-ticket-{member.name.lower()}"
-        )
+        existing = discord.utils.get(guild.text_channels, name=f"recruiter-ticket-{member.name.lower()}")
         if existing:
-            return await interaction.response.send_message(
-                f"You already have an open ticket → {existing.mention}", ephemeral=True
-            )
+            return await interaction.response.send_message(f"You already have an open ticket → {existing.mention}", ephemeral=True)
 
         await interaction.response.defer(ephemeral=True)
 
@@ -331,9 +407,7 @@ class RecruiterLaunchView(discord.ui.View):
         }
         staff = discord.utils.get(guild.roles, name=cfg.STAFF_ROLE)
         if staff:
-            overwrites[staff] = discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, attach_files=True
-            )
+            overwrites[staff] = discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True)
 
         channel = await guild.create_text_channel(
             name=f"recruiter-ticket-{member.name}",
@@ -346,11 +420,8 @@ class RecruiterLaunchView(discord.ui.View):
             title="✦ Recruiter Application Opened",
             description=(
                 f"Welcome {member.mention}\n\n"
-                "Your application has been created.\n"
-                "Staff will review it shortly.\n\n"
-                "────────────────────\n"
-                "**Staff Controls**\n"
-                "Use the buttons below to accept or deny."
+                "Your application has been created.\nStaff will review it shortly.\n\n"
+                "────────────────────\n**Staff Controls**\nUse the buttons below."
             ),
         )
 
@@ -368,9 +439,7 @@ class TicketActionView(discord.ui.View):
 
     async def _admin_only(self, interaction: discord.Interaction) -> bool:
         if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message(
-                "Only administrators can process applications.", ephemeral=True
-            )
+            await interaction.response.send_message("Only administrators can process applications.", ephemeral=True)
             return False
         return True
 
@@ -503,10 +572,7 @@ class RecruiterUserSelect(discord.ui.UserSelect):
             embed.add_field(name="NameMC Lookup", value="Could not verify skin / history.", inline=False)
 
         try:
-            await recruiter.send(
-                embed=embed,
-                view=RecruiterDecisionView(self.applicant_id, interaction.guild.id, self.answers),
-            )
+            await recruiter.send(embed=embed, view=RecruiterDecisionView(self.applicant_id, interaction.guild.id, self.answers))
             await interaction.followup.send("Application sent to the recruiter’s DMs.", ephemeral=True)
         except discord.Forbidden:
             await interaction.followup.send("That recruiter has DMs closed.", ephemeral=True)
@@ -530,10 +596,7 @@ class RecruiterDecisionView(discord.ui.View):
             return await interaction.response.send_message("User has left the server.", ephemeral=True)
 
         trial = discord.utils.get(guild.roles, name=cfg.TRIAL_MEMBER)
-        region_role = discord.utils.get(
-            guild.roles,
-            name=cfg.TRIAL_AS if self.answers["region"] == "AS" else cfg.TRIAL_EU,
-        )
+        region_role = discord.utils.get(guild.roles, name=cfg.TRIAL_AS if self.answers["region"] == "AS" else cfg.TRIAL_EU)
         roles = [r for r in (trial, region_role) if r]
         if roles:
             await member.add_roles(*roles, reason="Recruit approved")
@@ -562,7 +625,331 @@ class RecruiterDecisionView(discord.ui.View):
 
 
 # ──────────────────────────────────────────────
-# Cogs
+# Economy Cog
+# ──────────────────────────────────────────────
+class EconomyCog(commands.Cog):
+    def __init__(self, bot: HeavenBot):
+        self.bot = bot
+
+    @commands.command(name="balance", aliases=["bal", "wallet"])
+    @commands.cooldown(1, 3, commands.BucketType.user)
+    async def balance(self, ctx: commands.Context, member: discord.Member = None):
+        member = member or ctx.author
+        data = await economy.get_user(member.id)
+        embed = make_embed(
+            title=f"💰 {member.display_name}'s Balance",
+            description=f"**Wallet** `{data['wallet']:,}` pts\n**Bank**  `{data['bank']:,}` pts\n**Net Worth** `{data['wallet'] + data['bank']:,}` pts",
+            color=cfg.ACCENT,
+        )
+        await ctx.send(embed=embed)
+
+    @commands.command(name="daily")
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def daily(self, ctx: commands.Context):
+        data = await economy.get_user(ctx.author.id)
+        now = _utcnow()
+
+        if data["last_daily"]:
+            last = datetime.fromisoformat(data["last_daily"])
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+            if now - last < timedelta(hours=20):
+                remaining = timedelta(hours=20) - (now - last)
+                hours, rem = divmod(int(remaining.total_seconds()), 3600)
+                mins = rem // 60
+                return await ctx.send(f"⏳ Daily already claimed. Come back in **{hours}h {mins}m**.")
+
+        amount = random.randint(cfg.DAILY_MIN, cfg.DAILY_MAX)
+        new_bal = await economy.add_wallet(ctx.author.id, amount)
+        await economy.update(ctx.author.id, last_daily=now.isoformat())
+
+        embed = make_embed(title="📅 Daily Claimed", description=f"You received **{amount}** points.\nNew wallet: `{new_bal:,}`", color=cfg.SUCCESS)
+        await ctx.send(embed=embed)
+
+    @commands.command(name="work")
+    @commands.cooldown(1, 45, commands.BucketType.user)
+    async def work(self, ctx: commands.Context):
+        amount = random.randint(cfg.WORK_MIN, cfg.WORK_MAX)
+        new_bal = await economy.add_wallet(ctx.author.id, amount)
+        jobs = ["scouted enemy territory", "ran recruit drills", "organized practice", "cleared tickets", "updated logs", "secured a trial"]
+        embed = make_embed(title="💼 Work Complete", description=f"You {random.choice(jobs)} and earned **{amount}** points.\nWallet: `{new_bal:,}`", color=cfg.SUCCESS)
+        await ctx.send(embed=embed)
+
+    @commands.command(name="rob", aliases=["heist", "steal"])
+    @commands.cooldown(1, 15, commands.BucketType.user)
+    async def rob(self, ctx: commands.Context, member: discord.Member):
+        if member.bot or member == ctx.author:
+            return await ctx.send("You can't rob that target.")
+
+        thief = await economy.get_user(ctx.author.id)
+        victim = await economy.get_user(member.id)
+        now = _utcnow()
+
+        if thief["last_rob"]:
+            last = datetime.fromisoformat(thief["last_rob"])
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+            if now - last < timedelta(seconds=cfg.ROB_COOLDOWN):
+                remaining = cfg.ROB_COOLDOWN - int((now - last).total_seconds())
+                return await ctx.send(f"⏳ Heist cooldown: **{remaining // 60}m {remaining % 60}s**")
+
+        if victim["wallet"] < cfg.MIN_ROB_AMOUNT:
+            return await ctx.send(f"{member.display_name} is too broke to rob.")
+
+        if random.random() > cfg.ROB_SUCCESS_CHANCE:
+            fine = min(thief["wallet"], random.randint(20, 60))
+            await economy.add_wallet(ctx.author.id, -fine)
+            await economy.update(ctx.author.id, last_rob=now.isoformat())
+            embed = make_embed(title="🚨 Heist Failed", description=f"You got caught trying to rob {member.mention}.\nLost **{fine}** points.", color=cfg.DANGER)
+            return await ctx.send(embed=embed)
+
+        max_steal = int(victim["wallet"] * cfg.ROB_MAX_PERCENT)
+        stolen = random.randint(cfg.MIN_ROB_AMOUNT, max(cfg.MIN_ROB_AMOUNT, max_steal))
+        stolen = min(stolen, victim["wallet"])
+
+        await economy.add_wallet(member.id, -stolen)
+        await economy.add_wallet(ctx.author.id, stolen)
+        await economy.update(ctx.author.id, last_rob=now.isoformat(), total_robbed=thief["total_robbed"] + stolen)
+        await economy.update(member.id, times_robbed=victim["times_robbed"] + 1)
+
+        embed = make_embed(title="💀 Heist Successful", description=f"You robbed {member.mention} for **{stolen}** points.", color=cfg.SUCCESS)
+        await ctx.send(embed=embed)
+
+    @commands.command(name="pay", aliases=["give", "transfer"])
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def pay(self, ctx: commands.Context, member: discord.Member, amount: int):
+        if member.bot or member == ctx.author or amount <= 0:
+            return await ctx.send("Invalid.")
+        data = await economy.get_user(ctx.author.id)
+        if data["wallet"] < amount:
+            return await ctx.send("Insufficient funds.")
+        await economy.add_wallet(ctx.author.id, -amount)
+        await economy.add_wallet(member.id, amount)
+        await ctx.send(embed=make_embed(title="💸 Transfer", description=f"Sent **{amount}** points to {member.mention}.", color=cfg.SUCCESS))
+
+    @commands.command(name="deposit", aliases=["dep"])
+    @commands.cooldown(1, 3, commands.BucketType.user)
+    async def deposit(self, ctx: commands.Context, amount: str):
+        data = await economy.get_user(ctx.author.id)
+        amount_int = data["wallet"] if amount.lower() == "all" else int(amount) if amount.isdigit() else 0
+        if amount_int <= 0 or data["wallet"] < amount_int:
+            return await ctx.send("Invalid amount.")
+        await economy.update(ctx.author.id, wallet=data["wallet"] - amount_int, bank=data["bank"] + amount_int)
+        await ctx.send(f"🏦 Deposited **{amount_int}** points.")
+
+    @commands.command(name="withdraw", aliases=["with"])
+    @commands.cooldown(1, 3, commands.BucketType.user)
+    async def withdraw(self, ctx: commands.Context, amount: str):
+        data = await economy.get_user(ctx.author.id)
+        amount_int = data["bank"] if amount.lower() == "all" else int(amount) if amount.isdigit() else 0
+        if amount_int <= 0 or data["bank"] < amount_int:
+            return await ctx.send("Invalid amount.")
+        await economy.update(ctx.author.id, wallet=data["wallet"] + amount_int, bank=data["bank"] - amount_int)
+        await ctx.send(f"🏦 Withdrew **{amount_int}** points.")
+
+
+# ──────────────────────────────────────────────
+# Fun Cog  (pp, ship, and lots of fun)
+# ──────────────────────────────────────────────
+class FunCog(commands.Cog):
+    def __init__(self, bot: HeavenBot):
+        self.bot = bot
+
+    @commands.command(name="pp", aliases=["penis", "dick"])
+    @commands.cooldown(1, 4, commands.BucketType.user)
+    async def pp(self, ctx: commands.Context, member: discord.Member = None):
+        member = member or ctx.author
+        size = random.randint(0, 15)
+        bar = "8" + ("=" * size) + "D"
+        comments = {
+            0: "invisible?",
+            1: "micro",
+            2: "tiny",
+            3: "small",
+            4: "average-ish",
+            5: "decent",
+            6: "nice",
+            7: "respectable",
+            8: "solid",
+            9: "impressive",
+            10: "dangerous",
+            11: "weapon",
+            12: "illegal",
+            13: "mythical",
+            14: "god tier",
+            15: "server breaker",
+        }
+        embed = make_embed(
+            title=f"🍆 {member.display_name}'s PP",
+            description=f"`{bar}`\n**{size}/15** — {comments.get(size, '')}",
+            color=cfg.LOVE,
+        )
+        await ctx.send(embed=embed)
+
+    @commands.command(name="ship")
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def ship(self, ctx: commands.Context, user1: discord.Member, user2: discord.Member = None):
+        user2 = user2 or ctx.author
+        if user1 == user2:
+            return await ctx.send("You can't ship someone with themselves...")
+
+        # Consistent percentage based on IDs
+        seed = (user1.id + user2.id) % 101
+        percent = seed
+
+        if percent < 20:
+            quote = "Terrible match. Stay away."
+            emoji = "💔"
+        elif percent < 40:
+            quote = "Not looking good..."
+            emoji = "😕"
+        elif percent < 60:
+            quote = "Could work with effort."
+            emoji = "🙂"
+        elif percent < 80:
+            quote = "Pretty good chemistry!"
+            emoji = "😊"
+        elif percent < 95:
+            quote = "Strong ship potential!"
+            emoji = "💖"
+        else:
+            quote = "Soulmates. Absolute cinema."
+            emoji = "💘"
+
+        bar_filled = int(percent / 10)
+        bar = "█" * bar_filled + "░" * (10 - bar_filled)
+
+        embed = make_embed(
+            title=f"{emoji} Ship Meter",
+            description=(
+                f"**{user1.display_name}** ❤️ **{user2.display_name}**\n\n"
+                f"`{bar}` **{percent}%**\n\n"
+                f"{quote}"
+            ),
+            color=cfg.LOVE,
+        )
+        await ctx.send(embed=embed)
+
+    @commands.command(name="howgay")
+    @commands.cooldown(1, 4, commands.BucketType.user)
+    async def howgay(self, ctx: commands.Context, member: discord.Member = None):
+        member = member or ctx.author
+        percent = random.randint(0, 100)
+        embed = make_embed(
+            title="🏳️‍🌈 Gay Meter",
+            description=f"**{member.display_name}** is **{percent}%** gay.",
+            color=discord.Color.purple(),
+        )
+        await ctx.send(embed=embed)
+
+    @commands.command(name="rate")
+    @commands.cooldown(1, 3, commands.BucketType.user)
+    async def rate(self, ctx: commands.Context, *, thing: str):
+        rating = random.randint(0, 10)
+        embed = make_embed(title="⭐ Rate", description=f"I rate **{thing}** a **{rating}/10**.")
+        await ctx.send(embed=embed)
+
+    @commands.command(name="8ball", aliases=["ball"])
+    @commands.cooldown(1, 3, commands.BucketType.user)
+    async def eightball(self, ctx: commands.Context, *, question: str):
+        answers = [
+            "Yes.", "No.", "Maybe.", "Definitely.", "Absolutely not.",
+            "Ask again later.", "It is certain.", "Very doubtful.",
+            "Without a doubt.", "Don't count on it.", "Signs point to yes.",
+            "My sources say no.", "Outlook good.", "Better not tell you now."
+        ]
+        embed = make_embed(title="🎱 8ball", description=f"**Question:** {question}\n**Answer:** {random.choice(answers)}")
+        await ctx.send(embed=embed)
+
+    @commands.command(name="coinflip", aliases=["flip", "coin"])
+    @commands.cooldown(1, 2, commands.BucketType.user)
+    async def coinflip(self, ctx: commands.Context):
+        result = random.choice(["Heads", "Tails"])
+        await ctx.send(f"🪙 **{result}**!")
+
+    @commands.command(name="rps")
+    @commands.cooldown(1, 3, commands.BucketType.user)
+    async def rps(self, ctx: commands.Context, choice: str):
+        choice = choice.lower()
+        if choice not in ("rock", "paper", "scissors"):
+            return await ctx.send("Choose `rock`, `paper`, or `scissors`.")
+        bot_choice = random.choice(["rock", "paper", "scissors"])
+        wins = {"rock": "scissors", "paper": "rock", "scissors": "paper"}
+        if choice == bot_choice:
+            result = "It's a tie!"
+        elif wins[choice] == bot_choice:
+            result = "You win!"
+        else:
+            result = "I win!"
+        await ctx.send(f"You: **{choice}** | Bot: **{bot_choice}**\n**{result}**")
+
+    @commands.command(name="iq")
+    @commands.cooldown(1, 4, commands.BucketType.user)
+    async def iq(self, ctx: commands.Context, member: discord.Member = None):
+        member = member or ctx.author
+        score = random.randint(40, 160)
+        embed = make_embed(title="🧠 IQ Test", description=f"**{member.display_name}**'s IQ is **{score}**.")
+        await ctx.send(embed=embed)
+
+    @commands.command(name="simprate", aliases=["simp"])
+    @commands.cooldown(1, 4, commands.BucketType.user)
+    async def simprate(self, ctx: commands.Context, member: discord.Member = None):
+        member = member or ctx.author
+        percent = random.randint(0, 100)
+        embed = make_embed(title="😭 Simp Rate", description=f"**{member.display_name}** is **{percent}%** simp.")
+        await ctx.send(embed=embed)
+
+    @commands.command(name="kill")
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def kill(self, ctx: commands.Context, member: discord.Member):
+        if member == ctx.author:
+            return await ctx.send("No.")
+        methods = [
+            "was struck by lightning",
+            "fell into the void",
+            "got ratioed into oblivion",
+            "was deleted by the admins",
+            "got hit by a bus",
+            "was eaten by a creeper",
+            "died of cringe",
+            "got banned from life",
+        ]
+        await ctx.send(f"💀 **{member.display_name}** {random.choice(methods)}.")
+
+    @commands.command(name="joke")
+    @commands.cooldown(1, 4, commands.BucketType.user)
+    async def joke(self, ctx: commands.Context):
+        jokes = [
+            "Why do programmers prefer dark mode? Because light attracts bugs.",
+            "Why did the scarecrow get promoted? He was outstanding in his field.",
+            "I told my computer I needed a break... it froze.",
+            "Why don’t scientists trust atoms? Because they make up everything.",
+            "I’m reading a book about anti-gravity. It’s impossible to put down.",
+            "Why did the Discord bot go to therapy? It had too many issues.",
+        ]
+        await ctx.send(random.choice(jokes))
+
+    @commands.command(name="slot", aliases=["slots"])
+    @commands.cooldown(1, 6, commands.BucketType.user)
+    async def slot(self, ctx: commands.Context):
+        emojis = ["🍒", "🍋", "🔔", "⭐", "7️⃣", "💎"]
+        result = [random.choice(emojis) for _ in range(3)]
+        display = " | ".join(result)
+        if result[0] == result[1] == result[2]:
+            msg = f"**JACKPOT!** {display}"
+            color = cfg.SUCCESS
+        elif result[0] == result[1] or result[1] == result[2]:
+            msg = f"Close! {display}"
+            color = cfg.ACCENT
+        else:
+            msg = f"Better luck next time. {display}"
+            color = cfg.DANGER
+        embed = make_embed(title="🎰 Slots", description=msg, color=color)
+        await ctx.send(embed=embed)
+
+
+# ──────────────────────────────────────────────
+# Application + other cogs
 # ──────────────────────────────────────────────
 class ApplicationCog(commands.Cog):
     def __init__(self, bot: HeavenBot):
@@ -572,18 +959,14 @@ class ApplicationCog(commands.Cog):
     async def apply(self, ctx: commands.Context, minecraft_username: str = None):
         if not minecraft_username:
             return await ctx.send("Usage: `;apply <Minecraft_Username>`")
-
         msg = await ctx.send(f"Looking up `{minecraft_username}`…")
         data = await fetch_namemc(self.bot.session, minecraft_username)
         await msg.delete()
-
         if not data:
             return await ctx.send(f"Could not find account `{minecraft_username}`.")
-
         embed = make_embed(title="NameMC Profile", description=f"**Applicant**  {ctx.author.mention}", color=discord.Color.dark_green())
         embed.add_field(name="IGN", value=f"[{data['name']}]({data['url']})", inline=True)
         embed.add_field(name="UUID", value=f"`{data['uuid']}`", inline=True)
-
         history = "\n".join(f"• `{n}`" for n in data["history"][:12])
         if len(data["history"]) > 12:
             history += "\n• …"
@@ -598,10 +981,8 @@ class ApplicationCog(commands.Cog):
             title="✦ Recruiter Applications",
             description=(
                 "Want to join the **Heaven** management rotation?\n\n"
-                f"**Requirement**\n"
-                f"Recruit at least **{cfg.RECRUITER_QUOTA}** active members "
+                f"**Requirement**\nRecruit at least **{cfg.RECRUITER_QUOTA}** active members "
                 f"within your first **{cfg.RECRUITER_TRIAL_DAYS} days**.\n\n"
-                "────────────────────\n"
                 "Click the button below to open a private application ticket."
             ),
         )
@@ -611,14 +992,7 @@ class ApplicationCog(commands.Cog):
     @commands.command(name="refresh_recruits")
     @commands.has_permissions(administrator=True)
     async def drop_recruits_panel(self, ctx: commands.Context):
-        embed = make_embed(
-            title="✦ Heaven Trial Entry",
-            description=(
-                "Ready to join the team?\n\n"
-                "Click the button below to start your registration.\n"
-                "You’ll be asked for your IGN, region, and the recruiter who invited you."
-            ),
-        )
+        embed = make_embed(title="✦ Heaven Trial Entry", description="Click the button to start your registration.")
         await ctx.send(embed=embed, view=RecruitLaunchView())
         await ctx.message.delete()
 
@@ -627,18 +1001,10 @@ class ApplicationCog(commands.Cog):
         data = await store.all()
         if not data:
             return await ctx.send("The recruitment leaderboard is empty.")
-
         sorted_list = sorted(data.items(), key=lambda x: x[1].get("points", 0), reverse=True)[:10]
         medals = ["🥇", "🥈", "🥉"]
-        lines = []
-        for i, (_, info) in enumerate(sorted_list):
-            pts = info.get("points", 0)
-            name = info.get("username", "Unknown")
-            place = medals[i] if i < 3 else f"`#{i+1}`"
-            lines.append(f"{place}  **{name}**  —  `{pts}` recruits")
-
-        embed = make_embed(title="⚔️  Recruitment Leaderboard", description="\n".join(lines), color=cfg.ACCENT)
-        embed.set_footer(text="Heaven • Updates on recruit acceptance")
+        lines = [f"{medals[i] if i < 3 else f'`#{i+1}`'}  **{info.get('username', 'Unknown')}**  —  `{info.get('points', 0)}` recruits" for i, (_, info) in enumerate(sorted_list)]
+        embed = make_embed(title="⚔️ Recruitment Leaderboard", description="\n".join(lines), color=cfg.ACCENT)
         await ctx.send(embed=embed)
 
     @commands.command(name="say")
@@ -646,6 +1012,38 @@ class ApplicationCog(commands.Cog):
     async def say(self, ctx: commands.Context, *, text: str):
         await ctx.message.delete()
         await ctx.send(text)
+
+    @commands.command(name="help")
+    async def help_cmd(self, ctx: commands.Context):
+        embed = make_embed(
+            title="Heaven Bot — Command List",
+            description=(
+                "**Recruitment**\n`;apply` `;restrike` `;refresh_recruits` `;lb`\n\n"
+                "**Economy / Heist**\n`;bal` `;daily` `;work` `;rob` `;pay` `;deposit` `;withdraw`\n\n"
+                "**Fun**\n`;pp` `;ship` `;howgay` `;rate` `;8ball` `;coinflip` `;rps` `;iq` `;simp` `;kill` `;joke` `;slot`\n\n"
+                "**Roleplay**\n`;hug` `;slap` `;pat` `;punch`\n\n"
+                "**Info**\n`;userinfo` `;serverinfo` `;profile`\n\n"
+                "**Mod**\n`;kick` `;ban` `;clear` `;say`"
+            ),
+        )
+        await ctx.send(embed=embed)
+
+    @commands.command(name="profile")
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def profile(self, ctx: commands.Context, member: discord.Member = None):
+        member = member or ctx.author
+        eco = await economy.get_user(member.id)
+        rec = await store.get(member.id)
+        recruit_pts = rec.get("points", 0) if rec else 0
+        embed = make_embed(title=f"👤 {member.display_name}", color=member.color or cfg.EMBED_COLOR)
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.add_field(name="Wallet", value=f"`{eco['wallet']:,}`", inline=True)
+        embed.add_field(name="Bank", value=f"`{eco['bank']:,}`", inline=True)
+        embed.add_field(name="Recruit Pts", value=f"`{recruit_pts}`", inline=True)
+        embed.add_field(name="Total Earned", value=f"`{eco['total_earned']:,}`", inline=True)
+        embed.add_field(name="Total Robbed", value=f"`{eco['total_robbed']:,}`", inline=True)
+        embed.add_field(name="Times Robbed", value=f"`{eco['times_robbed']}`", inline=True)
+        await ctx.send(embed=embed)
 
 
 class RoleplayCog(commands.Cog):
@@ -750,7 +1148,6 @@ class ModerationCog(commands.Cog):
 async def check_recruiter_quotas():
     data = await store.all()
     now = _utcnow()
-
     for uid, info in list(data.items()):
         if uid.startswith("seed_"):
             continue
@@ -758,7 +1155,6 @@ async def check_recruiter_quotas():
             expires = datetime.fromisoformat(info["expires_at"])
             if expires.tzinfo is None:
                 expires = expires.replace(tzinfo=timezone.utc)
-
             if now >= expires:
                 if info.get("invite_count", 0) < cfg.RECRUITER_QUOTA:
                     guild = bot.get_guild(info.get("guild_id", 0))
