@@ -1,6 +1,6 @@
 """
 Heaven Recruiter Bot — Full Master Version
-Includes: Recruiter system + Economy/Heist + Fun commands + :3 reactions + Z+ Security
+All features + clean :3 reactions
 """
 
 from __future__ import annotations
@@ -57,7 +57,6 @@ class Config:
     HTTP_TIMEOUT: float = 8.0
     VIEW_TIMEOUT: float = 600.0
 
-    # Economy
     DAILY_MIN: int = 40
     DAILY_MAX: int = 90
     WORK_MIN: int = 15
@@ -177,14 +176,9 @@ class EconomyStore:
             key = str(user_id)
             if key not in self._data:
                 self._data[key] = {
-                    "wallet": 0,
-                    "bank": 0,
-                    "last_daily": None,
-                    "last_work": None,
-                    "last_rob": None,
-                    "total_earned": 0,
-                    "total_robbed": 0,
-                    "times_robbed": 0,
+                    "wallet": 0, "bank": 0, "last_daily": None,
+                    "last_work": None, "last_rob": None,
+                    "total_earned": 0, "total_robbed": 0, "times_robbed": 0,
                 }
                 await self._save_unlocked()
             return self._data[key]
@@ -250,7 +244,7 @@ async def fetch_namemc(session: aiohttp.ClientSession, username: str) -> Optiona
 
     history = [name]
     try:
-        headers = {"User-Agent": "HeavenBot/3.2"}
+        headers = {"User-Agent": "HeavenBot/3.3"}
         async with session.get(
             f"https://namemc.com/profile/{uuid}",
             headers=headers,
@@ -320,7 +314,7 @@ class HeavenBot(commands.Bot):
         total = sum(g.member_count or 0 for g in self.guilds)
         log.info("Logged in as %s (%s)", self.user, self.user.id)
         log.info("Guilds: %d | Members: ~%d", len(self.guilds), total)
-        log.info("All systems online • Z+ Security active")
+        log.info("All systems online")
 
         for guild in self.guilds:
             try:
@@ -348,17 +342,16 @@ class HeavenBot(commands.Bot):
         if message.author.bot:
             return
 
-        # :3 cute gif reply
+        # :3 cute reaction (clean Tenor links only)
         if message.content.strip() == ":3":
             gifs = [
                 "https://tenor.com/view/kawaiiheartchan-vtuber-anime-girl-anime-party-kawaii-gif-17852688621218965065",
                 "https://tenor.com/view/hasu-yuki-owo-shy-vtuber-gif-15997090049192212856",
-                "https://images-ext-1.discordapp.net/external/LFQXb53qvNsNE2_gLoKDWwB21XbNCFrYeKHf_M_sWvM/https/static.klipy.com/ii/c3a19a0b747a76e98651f2b9a3cca5ff/b3/36/TUltcKhEV4I2An.mp4",
             ]
             await message.reply(random.choice(gifs), mention_author=False)
             return
 
-        # Dictator feature
+        # Dictator
         content = message.content.lower()
         if "dictator" in content:
             target = discord.utils.find(
