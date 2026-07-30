@@ -1,5 +1,6 @@
 """
-Heaven Recruiter Bot — Master + Heist Economy + Fun Commands + Z+ Security
+Heaven Recruiter Bot — Full Master Version
+Includes: Recruiter system + Economy/Heist + Fun commands + :3 reactions + Z+ Security
 """
 
 from __future__ import annotations
@@ -9,7 +10,6 @@ import json
 import logging
 import os
 import random
-import string
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -250,7 +250,7 @@ async def fetch_namemc(session: aiohttp.ClientSession, username: str) -> Optiona
 
     history = [name]
     try:
-        headers = {"User-Agent": "HeavenBot/3.1"}
+        headers = {"User-Agent": "HeavenBot/3.2"}
         async with session.get(
             f"https://namemc.com/profile/{uuid}",
             headers=headers,
@@ -320,7 +320,7 @@ class HeavenBot(commands.Bot):
         total = sum(g.member_count or 0 for g in self.guilds)
         log.info("Logged in as %s (%s)", self.user, self.user.id)
         log.info("Guilds: %d | Members: ~%d", len(self.guilds), total)
-        log.info("Z+ Security + Fun systems online")
+        log.info("All systems online • Z+ Security active")
 
         for guild in self.guilds:
             try:
@@ -348,6 +348,17 @@ class HeavenBot(commands.Bot):
         if message.author.bot:
             return
 
+        # :3 cute gif reply
+        if message.content.strip() == ":3":
+            gifs = [
+                "https://tenor.com/view/kawaiiheartchan-vtuber-anime-girl-anime-party-kawaii-gif-17852688621218965065",
+                "https://tenor.com/view/hasu-yuki-owo-shy-vtuber-gif-15997090049192212856",
+                "https://images-ext-1.discordapp.net/external/LFQXb53qvNsNE2_gLoKDWwB21XbNCFrYeKHf_M_sWvM/https/static.klipy.com/ii/c3a19a0b747a76e98651f2b9a3cca5ff/b3/36/TUltcKhEV4I2An.mp4",
+            ]
+            await message.reply(random.choice(gifs), mention_author=False)
+            return
+
+        # Dictator feature
         content = message.content.lower()
         if "dictator" in content:
             target = discord.utils.find(
@@ -378,7 +389,7 @@ class HeavenBot(commands.Bot):
 bot = HeavenBot()
 
 # ──────────────────────────────────────────────
-# Views (kept original)
+# Views
 # ──────────────────────────────────────────────
 class RecruiterLaunchView(discord.ui.View):
     def __init__(self):
@@ -749,7 +760,7 @@ class EconomyCog(commands.Cog):
 
 
 # ──────────────────────────────────────────────
-# Fun Cog  (pp, ship, and lots of fun)
+# Fun Cog
 # ──────────────────────────────────────────────
 class FunCog(commands.Cog):
     def __init__(self, bot: HeavenBot):
@@ -762,22 +773,10 @@ class FunCog(commands.Cog):
         size = random.randint(0, 15)
         bar = "8" + ("=" * size) + "D"
         comments = {
-            0: "invisible?",
-            1: "micro",
-            2: "tiny",
-            3: "small",
-            4: "average-ish",
-            5: "decent",
-            6: "nice",
-            7: "respectable",
-            8: "solid",
-            9: "impressive",
-            10: "dangerous",
-            11: "weapon",
-            12: "illegal",
-            13: "mythical",
-            14: "god tier",
-            15: "server breaker",
+            0: "invisible?", 1: "micro", 2: "tiny", 3: "small", 4: "average-ish",
+            5: "decent", 6: "nice", 7: "respectable", 8: "solid", 9: "impressive",
+            10: "dangerous", 11: "weapon", 12: "illegal", 13: "mythical",
+            14: "god tier", 15: "server breaker",
         }
         embed = make_embed(
             title=f"🍆 {member.display_name}'s PP",
@@ -793,39 +792,26 @@ class FunCog(commands.Cog):
         if user1 == user2:
             return await ctx.send("You can't ship someone with themselves...")
 
-        # Consistent percentage based on IDs
-        seed = (user1.id + user2.id) % 101
-        percent = seed
+        percent = (user1.id + user2.id) % 101
 
         if percent < 20:
-            quote = "Terrible match. Stay away."
-            emoji = "💔"
+            quote, emoji = "Terrible match. Stay away.", "💔"
         elif percent < 40:
-            quote = "Not looking good..."
-            emoji = "😕"
+            quote, emoji = "Not looking good...", "😕"
         elif percent < 60:
-            quote = "Could work with effort."
-            emoji = "🙂"
+            quote, emoji = "Could work with effort.", "🙂"
         elif percent < 80:
-            quote = "Pretty good chemistry!"
-            emoji = "😊"
+            quote, emoji = "Pretty good chemistry!", "😊"
         elif percent < 95:
-            quote = "Strong ship potential!"
-            emoji = "💖"
+            quote, emoji = "Strong ship potential!", "💖"
         else:
-            quote = "Soulmates. Absolute cinema."
-            emoji = "💘"
+            quote, emoji = "Soulmates. Absolute cinema.", "💘"
 
-        bar_filled = int(percent / 10)
-        bar = "█" * bar_filled + "░" * (10 - bar_filled)
+        bar = "█" * (percent // 10) + "░" * (10 - percent // 10)
 
         embed = make_embed(
             title=f"{emoji} Ship Meter",
-            description=(
-                f"**{user1.display_name}** ❤️ **{user2.display_name}**\n\n"
-                f"`{bar}` **{percent}%**\n\n"
-                f"{quote}"
-            ),
+            description=f"**{user1.display_name}** ❤️ **{user2.display_name}**\n\n`{bar}` **{percent}%**\n\n{quote}",
             color=cfg.LOVE,
         )
         await ctx.send(embed=embed)
@@ -835,11 +821,7 @@ class FunCog(commands.Cog):
     async def howgay(self, ctx: commands.Context, member: discord.Member = None):
         member = member or ctx.author
         percent = random.randint(0, 100)
-        embed = make_embed(
-            title="🏳️‍🌈 Gay Meter",
-            description=f"**{member.display_name}** is **{percent}%** gay.",
-            color=discord.Color.purple(),
-        )
+        embed = make_embed(title="🏳️‍🌈 Gay Meter", description=f"**{member.display_name}** is **{percent}%** gay.", color=discord.Color.purple())
         await ctx.send(embed=embed)
 
     @commands.command(name="rate")
@@ -905,14 +887,9 @@ class FunCog(commands.Cog):
         if member == ctx.author:
             return await ctx.send("No.")
         methods = [
-            "was struck by lightning",
-            "fell into the void",
-            "got ratioed into oblivion",
-            "was deleted by the admins",
-            "got hit by a bus",
-            "was eaten by a creeper",
-            "died of cringe",
-            "got banned from life",
+            "was struck by lightning", "fell into the void", "got ratioed into oblivion",
+            "was deleted by the admins", "got hit by a bus", "was eaten by a creeper",
+            "died of cringe", "got banned from life",
         ]
         await ctx.send(f"💀 **{member.display_name}** {random.choice(methods)}.")
 
@@ -936,20 +913,17 @@ class FunCog(commands.Cog):
         result = [random.choice(emojis) for _ in range(3)]
         display = " | ".join(result)
         if result[0] == result[1] == result[2]:
-            msg = f"**JACKPOT!** {display}"
-            color = cfg.SUCCESS
+            msg, color = f"**JACKPOT!** {display}", cfg.SUCCESS
         elif result[0] == result[1] or result[1] == result[2]:
-            msg = f"Close! {display}"
-            color = cfg.ACCENT
+            msg, color = f"Close! {display}", cfg.ACCENT
         else:
-            msg = f"Better luck next time. {display}"
-            color = cfg.DANGER
+            msg, color = f"Better luck next time. {display}", cfg.DANGER
         embed = make_embed(title="🎰 Slots", description=msg, color=color)
         await ctx.send(embed=embed)
 
 
 # ──────────────────────────────────────────────
-# Application + other cogs
+# Application Cog
 # ──────────────────────────────────────────────
 class ApplicationCog(commands.Cog):
     def __init__(self, bot: HeavenBot):
@@ -1023,7 +997,8 @@ class ApplicationCog(commands.Cog):
                 "**Fun**\n`;pp` `;ship` `;howgay` `;rate` `;8ball` `;coinflip` `;rps` `;iq` `;simp` `;kill` `;joke` `;slot`\n\n"
                 "**Roleplay**\n`;hug` `;slap` `;pat` `;punch`\n\n"
                 "**Info**\n`;userinfo` `;serverinfo` `;profile`\n\n"
-                "**Mod**\n`;kick` `;ban` `;clear` `;say`"
+                "**Mod**\n`;kick` `;ban` `;clear` `;say`\n\n"
+                "**Triggers**\n`:3` → cute gif\n`dictator` → pings wrierrr"
             ),
         )
         await ctx.send(embed=embed)
